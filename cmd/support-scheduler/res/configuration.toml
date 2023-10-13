@@ -1,0 +1,79 @@
+ScheduleIntervalTime = 500
+
+[Writable]
+LogLevel = "INFO"
+    [Writable.InsecureSecrets]
+        [Writable.InsecureSecrets.DB]
+        path = "redisdb"
+            [Writable.InsecureSecrets.DB.Secrets]
+            username = ""
+            password = ""
+
+[Service]
+HealthCheckInterval = "10s"
+Host = "localhost"
+Port = 59861
+ServerBindAddr = "" # Leave blank so default to Host value unless different value is needed.
+StartupMsg = "This is the Support Scheduler Microservice"
+MaxResultCount = 1024
+MaxRequestSize = 0 # Not curently used. Defines the maximum size of http request body in bytes
+RequestTimeout = "5s"
+  [Service.CORSConfiguration]
+  EnableCORS = false
+  CORSAllowCredentials = false
+  CORSAllowedOrigin = "https://localhost"
+  CORSAllowedMethods = "GET, POST, PUT, PATCH, DELETE"
+  CORSAllowedHeaders = "Authorization, Accept, Accept-Language, Content-Language, Content-Type, X-Correlation-ID"
+  CORSExposeHeaders = "Cache-Control, Content-Language, Content-Length, Content-Type, Expires, Last-Modified, Pragma, X-Correlation-ID"
+  CORSMaxAge = 3600
+
+[Registry]
+Host = "localhost"
+Port = 8500
+Type = "consul"
+
+[Databases]
+  [Databases.Primary]
+  Host = "localhost"
+  Name = "scheduler"
+  Port = 6379
+  Timeout = 5000
+  Type = "redisdb"
+
+[Intervals]
+    [Intervals.Midnight]
+    Name = "midnight"
+    Start = "20180101T000000"
+    Interval = "24h"
+
+[IntervalActions]
+    [IntervalActions.ScrubAged]
+    Name = "scrub-aged-events"
+    Host = "localhost"
+    Port = 59880
+    Protocol = "http"
+    Method = "DELETE"
+    Target = "core-data"
+    Path = "/api/v2/event/age/604800000000000" # Remove events older than 7 days
+    Interval = "midnight"
+    AdminState = "UNLOCKED"
+
+[SecretStore]
+Type = "vault"
+Protocol = "http"
+Host = "localhost"
+Port = 8200
+Path = "support-scheduler/"
+TokenFile = "/tmp/edgex/secrets/support-scheduler/secrets-token.json"
+RootCaCertPath = ""
+ServerName = ""
+  [SecretStore.Authentication]
+  AuthType = "X-Vault-Token"
+  [SecretStore.RuntimeTokenProvider]
+  Enabled = false
+  Protocol = "https"
+  Host = "localhost"
+  Port = 59841
+  TrustDomain = "edgexfoundry.org"
+  EndpointSocket = "/tmp/edgex/secrets/spiffe/public/api.sock"
+  RequiredSecrets = "redisdb"

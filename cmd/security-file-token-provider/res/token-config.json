@@ -1,0 +1,177 @@
+{
+  "core-command": {
+    "edgex_use_defaults": true,
+    "custom_policy": {
+      "path": {
+        "secret/edgex/core-command/redisdb": {
+          "capabilities": [
+            "list",
+            "read"
+          ]
+        }
+      }
+    }
+  },
+  "core-data": {
+    "edgex_use_defaults": true,
+    "custom_policy": {
+      "path": {
+        "secret/edgex/core-data/redisdb": {
+          "capabilities": [
+            "list",
+            "read"
+          ]
+        }
+      }
+    }
+  },
+  "core-metadata": {
+    "edgex_use_defaults": true,
+    "custom_policy": {
+      "path": {
+        "secret/edgex/core-metadata/redisdb": {
+          "capabilities": [
+            "list",
+            "read"
+          ]
+        }
+      }
+    }
+  },
+  "security-bootstrapper-redis": {
+    "edgex_use_defaults": true,
+    "custom_policy": {
+      "path": {
+        "secret/edgex/security-bootstrapper-redis/redisdb": {
+          "capabilities": [
+            "list",
+            "read"
+          ]
+        }
+      }
+    }
+  },
+  "support-notifications": {
+    "edgex_use_defaults": true,
+    "custom_policy": {
+      "path": {
+        "secret/edgex/support-notifications/redisdb": {
+          "capabilities": [
+            "list",
+            "read"
+          ]
+        }
+      }
+    }
+  },
+  "app-rules-engine": {
+    "edgex_use_defaults": true
+  },
+  "device-virtual": {
+    "edgex_use_defaults": true
+  },
+  "device-rest": {
+    "edgex_use_defaults": true
+  },
+  "sys-mgmt-agent": {
+    "edgex_use_defaults": true
+  },
+  "support-scheduler": {
+    "edgex_use_defaults": true,
+    "custom_policy": {
+      "path": {
+        "secret/edgex/support-scheduler/redisdb": {
+          "capabilities": [
+            "list",
+            "read"
+          ]
+        }
+      }
+    }
+  },
+  "security-secretstore-setup": {
+    "edgex_use_defaults": true,
+    "custom_policy": {
+      "path": {
+        "secret/edgex/security-proxy-setup/kong-tls": {
+          "capabilities": [
+            "list",
+            "read",
+            "create",
+            "update",
+            "delete"
+          ]
+        },
+        "secret/edgex/redis/*": {
+          "capabilities": [
+            "list",
+            "read",
+            "create",
+            "update",
+            "delete"
+          ]
+        }
+      }
+    }
+  },
+  "security-proxy-setup": {
+    "edgex_use_defaults": true
+  },
+  "security-file-token-provider": {
+    "edgex_use_defaults": true
+  },
+  "security-spiffe-token-provider": {
+    "edgex_use_defaults": true,
+    "custom_policy": {
+      "path": {
+        "auth/token/create": {
+          "capabilities": [
+            "create",
+            "update",
+            "sudo"
+          ]
+        },
+        "auth/token/create-orphan": {
+          "capabilities": [
+            "create",
+            "update",
+            "sudo"
+          ]
+        },
+        "auth/token/create/*": {
+          "capabilities": [
+            "create",
+            "update",
+            "sudo"
+          ]
+        },
+        "sys/policies/acl/edgex-service-*": {
+          "capabilities": [
+            "create",
+            "read",
+            "update",
+            "delete"
+          ]
+        },
+        "sys/policies/acl": {
+          "capabilities": [
+            "list"
+          ]
+        },
+        "secret/edgex/security-bootstrapper-redis/redisdb": {
+          "capabilities": [
+            "read"
+          ]
+        },
+        "secret/edgex/*": {
+          "capabilities": [
+            "list",
+            "create",
+            "update",
+            "delete"
+          ]
+        }
+      }
+    }
+  }
+}

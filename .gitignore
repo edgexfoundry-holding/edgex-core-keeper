@@ -1,0 +1,46 @@
+.idea/
+vendor
+*.exe
+glide.lock
+*.DS_Store
+docker/docker-compose.yml
+.project
+.vscode/
+coverage.out
+debug
+*.dll
+VERSION
+__debug_bin
+
+# binary files
+cmd/core-command/core-command
+cmd/core-data/core-data
+cmd/core-metadata/core-metadata
+cmd/security-proxy-setup/security-proxy-setup
+cmd/security-file-token-provider/security-file-token-provider
+cmd/security-secretstore-setup/security-secretstore-setup
+cmd/support-logging/support-logging
+cmd/support-notifications/support-notifications
+cmd/support-scheduler/support-scheduler
+cmd/sys-mgmt-agent/sys-mgmt-agent
+cmd/sys-mgmt-executor/sys-mgmt-executor
+cmd/secrets-config/secrets-config
+cmd/security-bootstrapper/security-bootstrapper
+cmd/security-spiffe-token-provider/security-spiffe-token-provider
+
+docs/_build/
+
+# log dirs
+**/logs
+
+# snap files
+*.snap
+*.assert
+*.bz2
+*.pyc
+parts/*
+prime/*
+stage/*
+snap/.snapcraft/*
+squashfs-root/
+

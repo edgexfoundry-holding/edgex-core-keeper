@@ -1,0 +1,81 @@
+[Writable]
+LogLevel = "INFO"
+ResendLimit = 2
+ResendInterval = "5s"
+  [Writable.InsecureSecrets]
+    [Writable.InsecureSecrets.DB]
+    path = "redisdb"
+      [Writable.InsecureSecrets.DB.Secrets]
+      username = ""
+      password = ""
+    [Writable.InsecureSecrets.SMTP]
+    path = "smtp"
+      [Writable.InsecureSecrets.SMTP.Secrets]
+      username = "username@mail.example.com"
+      password = ""
+
+[Service]
+HealthCheckInterval = "10s"
+Host = "localhost"
+Port = 59860
+ServerBindAddr = "" # Leave blank so default to Host value unless different value is needed.
+StartupMsg = "This is the Support Notifications Microservice"
+MaxResultCount = 1024
+MaxRequestSize = 0 # Not curently used. Defines the maximum size of http request body in bytes
+RequestTimeout = "5s"
+  [Service.CORSConfiguration]
+  EnableCORS = false
+  CORSAllowCredentials = false
+  CORSAllowedOrigin = "https://localhost"
+  CORSAllowedMethods = "GET, POST, PUT, PATCH, DELETE"
+  CORSAllowedHeaders = "Authorization, Accept, Accept-Language, Content-Language, Content-Type, X-Correlation-ID"
+  CORSExposeHeaders = "Cache-Control, Content-Language, Content-Length, Content-Type, Expires, Last-Modified, Pragma, X-Correlation-ID"
+  CORSMaxAge = 3600
+
+[Registry]
+Host = "localhost"
+Port = 8500
+Type = "consul"
+
+[Databases]
+  [Databases.Primary]
+  Host = "localhost"
+  Name = "notifications"
+  Port = 6379
+  Timeout = 5000
+  Type = "redisdb"
+
+[Smtp]
+  Host = "smtp.gmail.com"
+  Port = 587
+  Sender = "jdoe@gmail.com"
+  EnableSelfSignedCert = false
+  Subject = "EdgeX Notification"
+  # SecretPath is used to specify the secret path to store the credential(username and password) for connecting the SMTP server
+  # User need to store the credential via the /secret API before sending the email notification
+  SecretPath = "smtp"
+  # AuthMode is the SMTP authentication mechanism. Currently, "usernamepassword" is the only AuthMode supported by this service, and the secret keys are "username" and "password".
+  AuthMode = "usernamepassword"
+
+
+[SecretStore]
+Type = "vault"
+Protocol = "http"
+Host = "localhost"
+Port = 8200
+Path = "support-notifications/"
+TokenFile = "/tmp/edgex/secrets/support-notifications/secrets-token.json"
+RootCaCertPath = ""
+ServerName = ""
+SecretsFile = ""
+DisableScrubSecretsFile = false
+  [SecretStore.Authentication]
+  AuthType = "X-Vault-Token"
+  [SecretStore.RuntimeTokenProvider]
+  Enabled = false
+  Protocol = "https"
+  Host = "localhost"
+  Port = 59841
+  TrustDomain = "edgexfoundry.org"
+  EndpointSocket = "/tmp/edgex/secrets/spiffe/public/api.sock"
+  RequiredSecrets = "redisdb"
