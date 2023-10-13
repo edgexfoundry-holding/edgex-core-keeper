@@ -1,0 +1,77 @@
+[Writable]
+LogLevel = "INFO"
+  [Writable.ProfileChange]
+  StrictDeviceProfileChanges = false
+  StrictDeviceProfileDeletes = false
+  [Writable.InsecureSecrets]
+    [Writable.InsecureSecrets.DB]
+    path = "redisdb"
+      [Writable.InsecureSecrets.DB.Secrets]
+      username = ""
+      password = ""
+
+[Service]
+HealthCheckInterval = "10s"
+Host = "localhost"
+Port = 59881
+ServerBindAddr = "" # Leave blank so default to Host value unless different value is needed.
+StartupMsg = "This is the EdgeX Core Metadata Microservice"
+MaxResultCount = 1024
+MaxRequestSize = 0 # Not curently used. Defines the maximum size of http request body in bytes
+RequestTimeout = "5s"
+  [Service.CORSConfiguration]
+  EnableCORS = false
+  CORSAllowCredentials = false
+  CORSAllowedOrigin = "https://localhost"
+  CORSAllowedMethods = "GET, POST, PUT, PATCH, DELETE"
+  CORSAllowedHeaders = "Authorization, Accept, Accept-Language, Content-Language, Content-Type, X-Correlation-ID"
+  CORSExposeHeaders = "Cache-Control, Content-Language, Content-Length, Content-Type, Expires, Last-Modified, Pragma, X-Correlation-ID"
+  CORSMaxAge = 3600
+
+[Registry]
+Host = "localhost"
+Port = 8500
+Type = "consul"
+
+[Clients]
+  [Clients.support-notifications]
+  Protocol = "http"
+  Host = "localhost"
+  Port = 59860
+
+[Databases]
+  [Databases.Primary]
+  Host = "localhost"
+  Name = "metadata"
+  Password = "password"
+  Username = "meta"
+  Port = 6379
+  Timeout = 5000
+  Type = "redisdb"
+
+[Notifications]
+PostDeviceChanges = false
+Content = "Metadata notice: "
+Sender = "core-metadata"
+Description = "Metadata change notice"
+Label = "metadata"
+
+[SecretStore]
+Type = "vault"
+Protocol = "http"
+Host = "localhost"
+Port = 8200
+Path = "core-metadata/"
+TokenFile = "/tmp/edgex/secrets/core-metadata/secrets-token.json"
+RootCaCertPath = ""
+ServerName = ""
+  [SecretStore.Authentication]
+  AuthType = "X-Vault-Token"
+  [SecretStore.RuntimeTokenProvider]
+  Enabled = false
+  Protocol = "https"
+  Host = "localhost"
+  Port = 59841
+  TrustDomain = "edgexfoundry.org"
+  EndpointSocket = "/tmp/edgex/secrets/spiffe/public/api.sock"
+  RequiredSecrets = "redisdb"
