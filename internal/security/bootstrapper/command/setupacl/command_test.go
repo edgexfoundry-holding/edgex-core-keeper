@@ -35,7 +35,7 @@ import (
 	"github.com/edgexfoundry/edgex-go/internal/security/bootstrapper/helper"
 	"github.com/edgexfoundry/edgex-go/internal/security/bootstrapper/interfaces"
 
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/clients/logger"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/clients/logger"
 )
 
 func TestNewCommand(t *testing.T) {
@@ -118,7 +118,6 @@ func TestExecute(t *testing.T) {
 	for _, tt := range tests {
 		test := tt // capture as local copy
 		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
 			// prepare test
 			testSrvOptions := serverOptions{
 				aclBootstrapOkResponse:  test.aclOkResponse,
@@ -209,7 +208,6 @@ func TestMultipleExecuteCalls(t *testing.T) {
 	for _, tt := range tests {
 		test := tt // capture as local copy
 		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
 			// prepare test
 			testSrvOptions := serverOptions{
 				aclBootstrapOkResponse:  true,
@@ -298,7 +296,7 @@ func TestGetUniqueRoleNames(t *testing.T) {
 	testConfigOneRole["testRole1"] = config.ACLRoleInfo{Description: "role1"}
 
 	// random number of roles between 2 and 4
-	numOfConfigRoles := rand.Intn(1)*3 + 2 // nolint:gosec
+	numOfConfigRoles := rand.Intn(3)*3 + 2 // nolint:gosec
 	testConfigMultipleRoles := make(map[string]config.ACLRoleInfo)
 	for i := 0; i < numOfConfigRoles; i++ {
 		roleName := "testRole" + strconv.Itoa(i+1)

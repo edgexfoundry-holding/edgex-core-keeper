@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2020 Intel Corporation
+// Copyright (c) 2020-2023 Intel Corporation
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -10,9 +10,8 @@ import (
 	"testing"
 
 	"github.com/edgexfoundry/edgex-go/internal/security/config/interfaces"
-	"github.com/edgexfoundry/edgex-go/internal/security/proxy/config"
 
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/clients/logger"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/clients/logger"
 
 	"github.com/stretchr/testify/require"
 )
@@ -21,10 +20,9 @@ import (
 func TestHelp(t *testing.T) {
 	// Arrange
 	lc := logger.MockLogger{}
-	config := &config.ConfigurationStruct{}
 
 	// Act
-	command, err := NewCommand(lc, config, []string{})
+	command, err := NewCommand(lc, []string{})
 	require.NoError(t, err)
 
 	code, err := command.Execute()
@@ -38,10 +36,9 @@ func TestHelp(t *testing.T) {
 func TestHelpBadArg(t *testing.T) {
 	// Arrange
 	lc := logger.MockLogger{}
-	config := &config.ConfigurationStruct{}
 
 	// Act
-	command, err := NewCommand(lc, config, []string{"-badarg"})
+	command, err := NewCommand(lc, []string{"-badarg"})
 
 	// Assert
 	require.Error(t, err)

@@ -11,7 +11,7 @@ import (
 	"github.com/edgexfoundry/edgex-go/internal/support/scheduler/config"
 	"github.com/edgexfoundry/edgex-go/internal/support/scheduler/infrastructure/interfaces"
 
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/clients/logger"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/clients/logger"
 
 	"github.com/stretchr/testify/require"
 )
@@ -25,6 +25,6 @@ func TestNewManager(t *testing.T) {
 		IntervalActions:      nil,
 		ScheduleIntervalTime: 500,
 	}
-	manager := NewManager(lc, config)
+	manager := NewManager(lc, config, nil)
 	require.NotNil(t, manager)
 }

@@ -18,8 +18,8 @@ import (
 
 	"github.com/edgexfoundry/edgex-go/internal/security/kdf"
 	"github.com/edgexfoundry/edgex-go/internal/security/pipedhexreader"
-	"github.com/edgexfoundry/go-mod-secrets/v2/pkg/token/fileioperformer"
-	"github.com/edgexfoundry/go-mod-secrets/v2/pkg/types"
+	"github.com/edgexfoundry/go-mod-secrets/v3/pkg/token/fileioperformer"
+	"github.com/edgexfoundry/go-mod-secrets/v3/pkg/types"
 )
 
 /*
@@ -81,7 +81,7 @@ func (v *VMKEncryption) LoadIKM(ikmBinPath string) error {
 	}
 	ikm, err := v.pipedHexReader.ReadHexBytesFromExe(ikmBinPath)
 	if err != nil {
-		return fmt.Errorf("Error reading input key material from IKM_HOOK - encryption not enabled: %w", err)
+		return fmt.Errorf("Error reading input key material from EDGEX_IKM_HOOK - encryption not enabled: %w", err)
 	}
 	v.ikm = ikm
 	v.encrypting = true

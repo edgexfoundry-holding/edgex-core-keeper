@@ -1,5 +1,6 @@
 #  ----------------------------------------------------------------------------------
 #  Copyright 2018 Cavium
+#  Copyright 2023 Intel Corporation
 #
 #  Licensed under the Apache License, Version 2.0 (the "License");
 #  you may not use this file except in compliance with the License.
@@ -15,15 +16,12 @@
 # 
 #  ----------------------------------------------------------------------------------
 
-ARG BUILDER_BASE=golang:1.17-alpine3.15
+ARG BUILDER_BASE=golang:1.21-alpine3.18
 FROM ${BUILDER_BASE} AS builder
 
+ARG ADD_BUILD_TAGS=""
+
 WORKDIR /edgex-go
-
-# The main mirrors are giving us timeout issues on builds periodically.
-# So we can try these.
-
-RUN sed -e 's/dl-cdn[.]alpinelinux.org/nl.alpinelinux.org/g' -i~ /etc/apk/repositories
 
 RUN apk add --update --no-cache make bash git ca-certificates
 
@@ -33,20 +31,23 @@ RUN [ ! -d "vendor" ] && go mod download all || echo "skipping..."
 COPY . .
 RUN make cmd/support-notifications/support-notifications
 
-FROM alpine:3.14
+FROM alpine:3.18
 
 RUN apk add --update --no-cache ca-certificates dumb-init
+# Ensure using latest versions of all installed packages to avoid any recent CVEs
+RUN apk --no-cache upgrade
 
 LABEL license='SPDX-License-Identifier: Apache-2.0' \
-      copyright='Copyright (c) 2018: Cavium, Copyright (c) 2021: Intel Corporation'
+      copyright='Copyright (c) 2018: Cavium, Copyright (c) 2023: Intel Corporation'
 
 ENV APP_PORT=59860
 #expose support notifications port
 EXPOSE $APP_PORT
 
 COPY --from=builder /edgex-go/Attribution.txt /
+COPY --from=builder /edgex-go/security.txt /
 COPY --from=builder /edgex-go/cmd/support-notifications/support-notifications /
-COPY --from=builder /edgex-go/cmd/support-notifications/res/configuration.toml /res/configuration.toml
+COPY --from=builder /edgex-go/cmd/support-notifications/res/configuration.yaml /res/configuration.yaml
 
 ENTRYPOINT ["/support-notifications"]
-CMD ["-cp=consul.http://edgex-core-consul:8500", "--registry", "--confdir=/res"]
+CMD ["-cp=consul.http://edgex-core-consul:8500", "--registry"]

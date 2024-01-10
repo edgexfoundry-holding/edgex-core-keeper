@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2021 Intel Corporation
+// Copyright (c) 2021-2023 Intel Corporation
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -14,9 +14,9 @@ import (
 
 	"github.com/edgexfoundry/edgex-go/internal/security/secretstore/config"
 
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/clients/logger"
-	"github.com/edgexfoundry/go-mod-secrets/v2/pkg/token/fileioperformer/mocks"
-	"github.com/edgexfoundry/go-mod-secrets/v2/pkg/types"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/clients/logger"
+	"github.com/edgexfoundry/go-mod-secrets/v3/pkg/token/fileioperformer/mocks"
+	"github.com/edgexfoundry/go-mod-secrets/v3/pkg/types"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -49,7 +49,7 @@ func TestLoadInitResponse(t *testing.T) {
 	initResponse := types.InitResponse{}
 
 	// Act
-	err := loadInitResponse(mockLogger, fileOpener, secretConfig, &initResponse)
+	err := LoadInitResponse(mockLogger, fileOpener, secretConfig, &initResponse)
 
 	// Assert
 	assert.NoError(t, err)

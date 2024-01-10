@@ -12,5 +12,20 @@ types:
     - build
     - ci
     - revert
-
+scopes:
+    - core-data
+    - data
+    - core-metadata
+    - metadata
+    - meta
+    - core-command
+    - command
+    - cmd
+    - docker
+    - security
+    - scheduler
+    - notifications
+    - sma
+    - deps
+    - all
 

@@ -2,15 +2,6 @@ This file contains the open source projects that are referenced by the EdgeX Fou
 As there are many Go services, this list is a union of all open source projects used by all the EdgeX Go services (found in https://github.com/edgexfoundry/edgex-go).
 Not all projects listed are used by each service.
 
-pkg/errors (BSD-2) https://github.com/pkg/errors
-https://github.com/pkg/errors/blob/master/LICENSE
-
-gorilla/mux (BSD-3) https://github.com/gorilla/mux
-https://github.com/gorilla/mux/blob/master/LICENSE
-
-pebbe/zmq4 (BSD-2) https://github.com/pebbe/zmq4
-https://github.com/pebbe/zmq4/blob/master/LICENSE.txt
-
 go-kit/kit (MIT) github.com/go-kit/kit
 https://github.com/go-kit/kit/blob/master/LICENSE
 
@@ -26,16 +17,13 @@ https://github.com/dgrijalva/jwt-go/blob/master/LICENSE
 google/uuid (BSD-3) https://github.com/google/uuid
 https://github.com/google/uuid/blob/master/LICENSE
 
-pelletier/go-toml (MIT) https://github.com/pelletier/go-toml
-https://github.com/pelletier/go-toml/blob/master/LICENSE
-
 influxdata/influxdb/client/v2 (MIT) https://github.com/influxdata/influxdb
 https://github.com/influxdata/influxdb/blob/master/LICENSE
 
 influxdata/platform (MIT) https://github.com/influxdata/platform
 https://github.com/influxdata/platform/blob/master/LICENSE
 
-eclipse/paho.mqtt.golang (Eclipse Public License 1.0) https://github.com/eclipse/paho.mqtt.golang
+eclipse/paho.mqtt.golang (Eclipse Public License 2.0) https://github.com/eclipse/paho.mqtt.golang
 https://github.com/eclipse/paho.mqtt.golang/blob/master/LICENSE
 
 mattn/go-xmpp (BSD-3) https://github.com/mattn/go-xmpp
@@ -110,22 +98,22 @@ https://bitbucket.org/bertimus9/systemstat/src/master/LICENSE
 davecgh/go-spew (ISC) https://github.com/davecgh/go-spew
 https://github.com/davecgh/go-spew/blob/master/LICENSE
 
-edgexfoundry/go-mod-bootstrap (Apache 2.0) https://github.com/edgexfoundry/go-mod-bootstrap/v2
+edgexfoundry/go-mod-bootstrap (Apache 2.0) https://github.com/edgexfoundry/go-mod-bootstrap/v3
 https://github.com/edgexfoundry/go-mod-bootstrap/blob/master/LICENSE
 
-edgexfoundry/go-mod-configuration (Apache 2.0) https://github.com/edgexfoundry/go-mod-configuration/v2
+edgexfoundry/go-mod-configuration (Apache 2.0) https://github.com/edgexfoundry/go-mod-configuration/v3
 https://github.com/edgexfoundry/go-mod-configuration/blob/master/LICENSE
 
-edgexfoundry/go-mod-core-contracts (Apache 2.0) https://github.com/edgexfoundry/go-mod-core-contracts/v2
+edgexfoundry/go-mod-core-contracts (Apache 2.0) https://github.com/edgexfoundry/go-mod-core-contracts/v3
 https://github.com/edgexfoundry/go-mod-core-contracts/blob/master/LICENSE
 
-edgexfoundry/go-mod-messaging (Apache 2.0) https://github.com/edgexfoundry/go-mod-messaging/v2
+edgexfoundry/go-mod-messaging (Apache 2.0) https://github.com/edgexfoundry/go-mod-messaging/v3
 https://github.com/edgexfoundry/go-mod-messaging/blob/master/LICENSE
 
-edgexfoundry/go-mod-registry (Apache 2.0) https://github.com/edgexfoundry/go-mod-registry/v2
+edgexfoundry/go-mod-registry (Apache 2.0) https://github.com/edgexfoundry/go-mod-registry/v3
 https://github.com/edgexfoundry/go-mod-registry/blob/master/LICENSE
 
-edgexfoundry/go-mod-secrets (Apache 2.0) https://github.com/edgexfoundry/go-mod-secrets/v2
+edgexfoundry/go-mod-secrets (Apache 2.0) https://github.com/edgexfoundry/go-mod-secrets/v3
 https://github.com/edgexfoundry/go-mod-secrets/blob/master/LICENSE
 
 gorilla/context (BSD-3) https://github.com/gorilla/context
@@ -188,11 +176,20 @@ https://github.com/mattn/go-colorable/blob/master/LICENSE
 github.com/mattn/go-isatty (MIT) https://github.com/mattn/go-isatty
 https://github.com/mattn/go-isatty/blob/master/LICENSE
 
-golang.org/x/sys (Unspecified) https://github.com/golang/sys
+golang.org/x/sys (BSD-3) https://github.com/golang/sys
 https://github.com/golang/sys/blob/master/LICENSE
 
-golang.org/x/text (Unspecified) https://github.com/golang/text
+golang.org/x/text (BSD-3) https://github.com/golang/text
 https://github.com/golang/text/blob/master/LICENSE
+
+golang.org/x/time (Unspecified) https://github.com/golang/time
+https://github.com/golang/text/blob/master/LICENSE
+
+golang.org/x/mod (BSD-3) https://github.com/golang/mod
+https://github.com/golang/mod/blob/master/LICENSE
+
+golang.org/x/tools (BSD-3) https://github.com/golang/tools
+https://github.com/golang/tools/blob/master/LICENSE
 
 github.com/gorilla/websocket (BSD-2) https://github.com/gorilla/websocket
 https://github.com/gorilla/websocket/blob/master/LICENSE
@@ -229,3 +226,42 @@ https://github.com/protocolbuffers/protobuf-go/blob/master/LICENSE
 
 gopkg.in/square/go-jose.v2 (Apache-2.0) https://github.com/square/go-jose/tree/v2.6.0
 https://github.com/square/go-jose/blob/v2.6.0/LICENSE
+
+github.com/Microsoft/go-winio (MIT) https://github.com/Microsoft/go-winio
+https://github.com/microsoft/go-winio/blob/master/LICENSE
+
+golang.org/x/sync (Unspecified) https://cs.opensource.google/go/x/sync
+https://cs.opensource.google/go/x/sync/+/master:LICENSE
+
+golang.org/x/exp (BSD-3) https://github.com/golang/tools
+https://github.com/golang/tools/blob/master/LICENSE
+
+github.com/nats-io/nats.go (Apache-2.0) https://github.com/nats-io/nats.go
+https://github.com/nats-io/nats.go/blob/main/LICENSE
+
+github.com/nats-io/nkeys (Apache-2.0) https://github.com/nats-io/nkeys
+https://github.com/nats-io/nkeys/blob/master/LICENSE
+
+github.com/nats-io/nuid (Apache-2.0) https://github.com/nats-io/nuid
+https://github.com/nats-io/nuid/blob/master/LICENSE
+
+github.com/go-jose/go-jose/v3 (Apache-2.0) https://github.com/go-jose/go-jose
+https://github.com/go-jose/go-jose/blob/v3/LICENSE
+
+github.com/klauspost/compress (Apache-2.0) https://github.com/klauspost/compress
+https://github.com/klauspost/compress/blob/master/LICENSE
+
+github.com/gabriel-vasile/mimetype (MIT) https://github.com/gabriel-vasile/mimetype
+https://github.com/gabriel-vasile/mimetype/blob/master/LICENSE
+
+github.com/labstack/echo/v4 (MIT) https://github.com/labstack/echo
+https://github.com/labstack/echo/blob/master/LICENSE
+
+github.com/labstack/gommon (MIT) https://github.com/labstack/gommon
+https://github.com/labstack/gommon/blob/master/LICENSE
+
+github.com/valyala/fasttemplate (MIT) https://github.com/valyala/fasttemplate
+https://github.com/valyala/fasttemplate/blob/master/LICENSE
+
+github.com/valyala/bytebufferpool (MIT) https://github.com/valyala/bytebufferpool
+https://github.com/valyala/bytebufferpool/blob/master/LICENSE

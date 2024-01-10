@@ -1,5 +1,7 @@
 /*******************************************************************************
  * Copyright 2018 Dell Inc.
+ * Copyright 2022-2023 IOTech Ltd.
+ * Copyright 2023 Intel Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
@@ -15,23 +17,25 @@
 package config
 
 import (
-	bootstrapConfig "github.com/edgexfoundry/go-mod-bootstrap/v2/config"
+	bootstrapConfig "github.com/edgexfoundry/go-mod-bootstrap/v3/config"
 )
 
 // ConfigurationStruct contains the configuration properties for the core-command service.
 type ConfigurationStruct struct {
-	Writable    WritableInfo
-	Clients     map[string]bootstrapConfig.ClientInfo
-	Databases   map[string]bootstrapConfig.Database
-	Registry    bootstrapConfig.RegistryInfo
-	Service     bootstrapConfig.ServiceInfo
-	SecretStore bootstrapConfig.SecretStoreInfo
+	Writable     WritableInfo
+	Clients      bootstrapConfig.ClientsCollection
+	Databases    map[string]bootstrapConfig.Database
+	Registry     bootstrapConfig.RegistryInfo
+	Service      bootstrapConfig.ServiceInfo
+	MessageBus   bootstrapConfig.MessageBusInfo
+	ExternalMQTT bootstrapConfig.ExternalMQTTInfo
 }
 
 // WritableInfo contains configuration properties that can be updated and applied without restarting the service.
 type WritableInfo struct {
 	LogLevel        string
 	InsecureSecrets bootstrapConfig.InsecureSecrets
+	Telemetry       bootstrapConfig.TelemetryInfo
 }
 
 // UpdateFromRaw converts configuration received from the registry to a service-specific configuration struct which is
@@ -39,10 +43,6 @@ type WritableInfo struct {
 func (c *ConfigurationStruct) UpdateFromRaw(rawConfig interface{}) bool {
 	configuration, ok := rawConfig.(*ConfigurationStruct)
 	if ok {
-		// Check that information was successfully read from Registry
-		if configuration.Service.Port == 0 {
-			return false
-		}
 		*c = *configuration
 	}
 	return ok
@@ -52,6 +52,11 @@ func (c *ConfigurationStruct) UpdateFromRaw(rawConfig interface{}) bool {
 // provide the appropriate structure to registry.Client's WatchForChanges().
 func (c *ConfigurationStruct) EmptyWritablePtr() interface{} {
 	return &WritableInfo{}
+}
+
+// GetWritablePtr returns pointer to the writable section
+func (c *ConfigurationStruct) GetWritablePtr() any {
+	return &c.Writable
 }
 
 // UpdateWritableFromRaw converts configuration received from the registry to a service-specific WritableInfo struct
@@ -65,15 +70,16 @@ func (c *ConfigurationStruct) UpdateWritableFromRaw(rawWritable interface{}) boo
 }
 
 // GetBootstrap returns the configuration elements required by the bootstrap.  Currently, a copy of the configuration
-// data is returned.  This is intended to be temporary -- since ConfigurationStruct drives the configuration.toml's
-// structure -- until we can make backwards-breaking configuration.toml changes (which would consolidate these fields
+// data is returned.  This is intended to be temporary -- since ConfigurationStruct drives the configuration.yaml's
+// structure -- until we can make backwards-breaking configuration.yaml changes (which would consolidate these fields
 // into an bootstrapConfig.BootstrapConfiguration struct contained within ConfigurationStruct).
 func (c *ConfigurationStruct) GetBootstrap() bootstrapConfig.BootstrapConfiguration {
 	return bootstrapConfig.BootstrapConfiguration{
-		Clients:     c.Clients,
-		Service:     c.Service,
-		Registry:    c.Registry,
-		SecretStore: c.SecretStore,
+		Clients:      &c.Clients,
+		Service:      &c.Service,
+		Registry:     &c.Registry,
+		MessageBus:   &c.MessageBus,
+		ExternalMQTT: &c.ExternalMQTT,
 	}
 }
 
@@ -88,8 +94,8 @@ func (c *ConfigurationStruct) GetRegistryInfo() bootstrapConfig.RegistryInfo {
 }
 
 // GetDatabaseInfo returns a database information map.
-func (c *ConfigurationStruct) GetDatabaseInfo() map[string]bootstrapConfig.Database {
-	return c.Databases
+func (c *ConfigurationStruct) GetDatabaseInfo() bootstrapConfig.Database {
+	return bootstrapConfig.Database{}
 }
 
 // GetInsecureSecrets returns the service's InsecureSecrets.
@@ -99,7 +105,5 @@ func (c *ConfigurationStruct) GetInsecureSecrets() bootstrapConfig.InsecureSecre
 
 // GetTelemetryInfo returns the service's Telemetry settings.
 func (c *ConfigurationStruct) GetTelemetryInfo() *bootstrapConfig.TelemetryInfo {
-	// TODO: return services actual TelemetryInfo once updated
-	return &bootstrapConfig.TelemetryInfo{}
-	//return &c.Writable.Telemetry
+	return &c.Writable.Telemetry
 }

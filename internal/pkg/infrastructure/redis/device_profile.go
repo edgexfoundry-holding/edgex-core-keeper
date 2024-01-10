@@ -11,9 +11,9 @@ import (
 
 	pkgCommon "github.com/edgexfoundry/edgex-go/internal/pkg/common"
 
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/common"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/errors"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/models"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/common"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/errors"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/models"
 
 	"github.com/gomodule/redigo/redis"
 )
@@ -199,6 +199,23 @@ func deleteDeviceProfileByName(conn redis.Conn, name string) errors.EdgeX {
 	if err != nil {
 		return errors.NewCommonEdgeXWrapper(err)
 	}
+
+	// Check the associated Device and ProvisionWatcher existence
+	devices, err := devicesByProfileName(conn, 0, 1, name)
+	if err != nil {
+		return errors.NewCommonEdgeXWrapper(err)
+	}
+	if len(devices) > 0 {
+		return errors.NewCommonEdgeX(errors.KindStatusConflict, "fail to delete the device profile when associated device exists", nil)
+	}
+	provisionWatchers, err := provisionWatchersByProfileName(conn, 0, 1, name)
+	if err != nil {
+		return errors.NewCommonEdgeXWrapper(err)
+	}
+	if len(provisionWatchers) > 0 {
+		return errors.NewCommonEdgeX(errors.KindStatusConflict, "fail to delete the device profile when associated provisionWatcher exists", nil)
+	}
+
 	err = deleteDeviceProfile(conn, deviceProfile)
 	if err != nil {
 		return errors.NewCommonEdgeXWrapper(err)

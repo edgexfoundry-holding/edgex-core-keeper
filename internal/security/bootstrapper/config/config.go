@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright 2021 Intel Corporation
+ * Copyright 2023 Intel Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
@@ -18,13 +18,12 @@ package config
 import (
 	"strings"
 
-	bootstrapConfig "github.com/edgexfoundry/go-mod-bootstrap/v2/config"
+	bootstrapConfig "github.com/edgexfoundry/go-mod-bootstrap/v3/config"
 )
 
 type ConfigurationStruct struct {
-	LogLevel    string
-	StageGate   StageGateInfo
-	SecretStore bootstrapConfig.SecretStoreInfo
+	LogLevel  string
+	StageGate StageGateInfo
 }
 
 // UpdateFromRaw converts configuration received from the registry to a service-specific configuration struct which is
@@ -39,6 +38,12 @@ func (c *ConfigurationStruct) EmptyWritablePtr() interface{} {
 	return nil
 }
 
+// GetWritablePtr returns pointer to the writable section
+// Not needed for this service, so return nil
+func (c *ConfigurationStruct) GetWritablePtr() any {
+	return nil
+}
+
 // UpdateWritableFromRaw converts configuration received from the registry to a service-specific WritableInfo struct
 // which is then used to overwrite the service's existing configuration's WritableInfo struct.
 func (c *ConfigurationStruct) UpdateWritableFromRaw(rawWritable interface{}) bool {
@@ -46,11 +51,11 @@ func (c *ConfigurationStruct) UpdateWritableFromRaw(rawWritable interface{}) boo
 }
 
 // GetBootstrap returns the configuration elements required by the bootstrap.  Currently, a copy of the configuration
-// data is returned.  This is intended to be temporary -- since ConfigurationStruct drives the configuration.toml's
-// structure -- until we can make backwards-breaking configuration.toml changes (which would consolidate these fields
+// data is returned.  This is intended to be temporary -- since ConfigurationStruct drives the configuration.yaml's
+// structure -- until we can make backwards-breaking configuration.yaml changes (which would consolidate these fields
 // into an bootstrapConfig.BootstrapConfiguration struct contained within ConfigurationStruct).
 func (c *ConfigurationStruct) GetBootstrap() bootstrapConfig.BootstrapConfiguration {
-	// temporary until we can make backwards-breaking configuration.toml change
+	// temporary until we can make backwards-breaking configuration.yaml change
 	return bootstrapConfig.BootstrapConfiguration{}
 }
 

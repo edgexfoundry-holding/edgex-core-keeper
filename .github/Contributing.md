@@ -14,7 +14,7 @@ Each commit message consists of a **header**, a **body** and a **footer**.  The 
 <footer>
 ```
 
-The **header** with **type** is mandatory.  The **scope** of the header is optional.  This repository has no predefined scopes.  A custom scope can be used for clarity if desired.
+The **header** with **type** is mandatory.  The **scope** of the header is optional as far as the automated PR checks are concerned, but be advised that PR reviewers **may request** you provide an applicable scope.
 
 Any line of the commit message cannot be longer 100 characters! This allows the message to be easier to read on GitHub as well as in various git tools.
 
@@ -22,12 +22,12 @@ The footer should contain a [closing reference to an issue](https://help.github.
 
 Example 1:
 ```
-feat: add new device wizard
+feat(data): add new get event query API
 ```
 
 Example 2:
 ```
-fix: correct default database port configuration 
+fix(meta): correct default database port configuration 
 
 Previously configuration used to the wrong default database port. This commit fixes the default database port for Redis in the configuration.
 
@@ -52,14 +52,19 @@ Must be one of the following:
 * **revert**: Reverts a previous commit.
 
 ### Scope
-There are no predefined scopes for this repository.  A custom scope can be provided for  clarity.
-
-### Subject
-The subject contains a succinct description of the change:
-
-* use the imperative, present tense: "change" not "changed" nor "changes"
-* don't capitalize the first letter
-* no dot (.) at the end
+Should be one of the following:
+Modules:
+* **core-data**: (or data) A change or addition to the core data micro service 
+* **core-metadata**: (or metadata or meta) A change or addition to the core metatdata micro service
+* **core-command**: (or command or cmd) A change or addition to the core command micro service
+* **docker**: A change or addition to docker packaging
+* **security**: A change or addition to security micro services
+* **scheduler**: A change or addition to the supporting scheduler micro service
+* **notifications**: A change or addition to the supporting notifications micro service
+* **sma**: A change or addition to the system management agent (or executor) micro service
+* **deps**: A change to any service due to dependencies
+* **all**: A change that affects all micro services or scopes
+* *no scope*:  If no scope is provided, it is assumed the PR does not apply to the above scopes
 
 ### Body
 Just as in the **subject**, use the imperative, present tense: "change" not "changed" nor "changes".

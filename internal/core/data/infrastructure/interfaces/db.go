@@ -1,13 +1,13 @@
 //
-// Copyright (C) 2020-2021 IOTech Ltd
+// Copyright (C) 2020-2023 IOTech Ltd
 //
 // SPDX-License-Identifier: Apache-2.0
 
 package interfaces
 
 import (
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/errors"
-	model "github.com/edgexfoundry/go-mod-core-contracts/v2/models"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/errors"
+	model "github.com/edgexfoundry/go-mod-core-contracts/v3/models"
 )
 
 type DBClient interface {
@@ -41,4 +41,5 @@ type DBClient interface {
 	ReadingsByDeviceNameAndResourceNamesAndTimeRange(deviceName string, resourceNames []string, start, end, offset, limit int) ([]model.Reading, uint32, errors.EdgeX)
 	ReadingsByDeviceNameAndTimeRange(deviceName string, start int, end int, offset int, limit int) ([]model.Reading, errors.EdgeX)
 	ReadingCountByDeviceNameAndTimeRange(deviceName string, start int, end int) (uint32, errors.EdgeX)
+	LatestReadingByOffset(offset uint32) (model.Reading, errors.EdgeX)
 }

@@ -1,26 +1,42 @@
-//
-// Copyright (C) 2020-2022 IOTech Ltd
-//
-// SPDX-License-Identifier: Apache-2.0
+/********************************************************************************
+ *  Copyright (C) 2020-2023 IOTech Ltd
+ *  Copyright 2023 Intel Corporation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
+ * in compliance with the License. You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under the License
+ * is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+ * or implied. See the License for the specific language governing permissions and limitations under
+ * the License.
+ *******************************************************************************/
 
 package application
 
 import (
 	"context"
+	goErrors "errors"
 	"fmt"
+	"time"
+
+	bootstrapContainer "github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/container"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/di"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/common"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/dtos"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/dtos/requests"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/errors"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/models"
 
 	"github.com/edgexfoundry/edgex-go/internal/core/metadata/container"
 	"github.com/edgexfoundry/edgex-go/internal/core/metadata/infrastructure/interfaces"
 	"github.com/edgexfoundry/edgex-go/internal/pkg/correlation"
-
-	bootstrapContainer "github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/container"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/di"
-
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/dtos"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/dtos/requests"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/errors"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/models"
+	"github.com/edgexfoundry/edgex-go/internal/pkg/utils"
 )
+
+// the suggested minimum duration for auto event interval
+const minAutoEventInterval = 1 * time.Millisecond
 
 // The AddDevice function accepts the new device model from the controller function
 // and then invokes AddDevice function of infrastructure layer to add new device
@@ -28,20 +44,15 @@ func AddDevice(d models.Device, ctx context.Context, dic *di.Container) (id stri
 	dbClient := container.DBClientFrom(dic.Get)
 	lc := bootstrapContainer.LoggingClientFrom(dic.Get)
 
+	// Check the existence of device service before device validation
 	exists, edgeXerr := dbClient.DeviceServiceNameExists(d.ServiceName)
 	if edgeXerr != nil {
-		return id, errors.NewCommonEdgeXWrapper(edgeXerr)
+		return id, errors.NewCommonEdgeX(errors.Kind(edgeXerr), fmt.Sprintf("device service '%s' existence check failed", d.ServiceName), edgeXerr)
 	} else if !exists {
-		return id, errors.NewCommonEdgeX(errors.KindEntityDoesNotExist, fmt.Sprintf("device service '%s' does not exists", d.ServiceName), nil)
-	}
-	exists, edgeXerr = dbClient.DeviceProfileNameExists(d.ProfileName)
-	if edgeXerr != nil {
-		return id, errors.NewCommonEdgeXWrapper(edgeXerr)
-	} else if !exists {
-		return id, errors.NewCommonEdgeX(errors.KindEntityDoesNotExist, fmt.Sprintf("device profile '%s' does not exists", d.ProfileName), nil)
+		return id, errors.NewCommonEdgeX(errors.KindContractInvalid, fmt.Sprintf("device service '%s' does not exists", d.ServiceName), nil)
 	}
 
-	err := validateDeviceCallback(ctx, dic, dtos.FromDeviceModelToDTO(d))
+	err := validateDeviceCallback(dtos.FromDeviceModelToDTO(d), dic)
 	if err != nil {
 		return "", errors.NewCommonEdgeXWrapper(err)
 	}
@@ -56,7 +67,15 @@ func AddDevice(d models.Device, ctx context.Context, dic *di.Container) (id stri
 		addedDevice.Id,
 		correlation.FromContext(ctx),
 	)
-	go addDeviceCallback(ctx, dic, dtos.FromDeviceModelToDTO(d))
+
+	// If device is successfully created, check each AutoEvent interval value and display a warning if it's smaller than the suggested 10ms value
+	for _, autoEvent := range d.AutoEvents {
+		utils.CheckMinInterval(autoEvent.Interval, minAutoEventInterval, lc)
+	}
+
+	deviceDTO := dtos.FromDeviceModelToDTO(addedDevice)
+	go publishSystemEvent(common.DeviceSystemEventType, common.SystemEventActionAdd, d.ServiceName, deviceDTO, ctx, dic)
+
 	return addedDevice.Id, nil
 }
 
@@ -74,7 +93,10 @@ func DeleteDeviceByName(name string, ctx context.Context, dic *di.Container) err
 	if err != nil {
 		return errors.NewCommonEdgeXWrapper(err)
 	}
-	go deleteDeviceCallback(ctx, dic, device)
+
+	deviceDTO := dtos.FromDeviceModelToDTO(device)
+	go publishSystemEvent(common.DeviceSystemEventType, common.SystemEventActionDelete, device.ServiceName, deviceDTO, ctx, dic)
+
 	return nil
 }
 
@@ -116,20 +138,13 @@ func PatchDevice(dto dtos.UpdateDevice, ctx context.Context, dic *di.Container) 
 	dbClient := container.DBClientFrom(dic.Get)
 	lc := bootstrapContainer.LoggingClientFrom(dic.Get)
 
+	// Check the existence of device service before device validation
 	if dto.ServiceName != nil {
 		exists, edgeXerr := dbClient.DeviceServiceNameExists(*dto.ServiceName)
 		if edgeXerr != nil {
 			return errors.NewCommonEdgeX(errors.Kind(edgeXerr), fmt.Sprintf("device service '%s' existence check failed", *dto.ServiceName), edgeXerr)
 		} else if !exists {
-			return errors.NewCommonEdgeX(errors.KindEntityDoesNotExist, fmt.Sprintf("device service '%s' does not exists", *dto.ServiceName), nil)
-		}
-	}
-	if dto.ProfileName != nil {
-		exists, edgeXerr := dbClient.DeviceProfileNameExists(*dto.ProfileName)
-		if edgeXerr != nil {
-			return errors.NewCommonEdgeX(errors.Kind(edgeXerr), fmt.Sprintf("device profile '%s' existence check failed", *dto.ProfileName), edgeXerr)
-		} else if !exists {
-			return errors.NewCommonEdgeX(errors.KindEntityDoesNotExist, fmt.Sprintf("device profile '%s' does not exists", *dto.ProfileName), nil)
+			return errors.NewCommonEdgeX(errors.KindContractInvalid, fmt.Sprintf("device service '%s' does not exists", *dto.ServiceName), nil)
 		}
 	}
 
@@ -146,7 +161,8 @@ func PatchDevice(dto dtos.UpdateDevice, ctx context.Context, dic *di.Container) 
 
 	requests.ReplaceDeviceModelFieldsWithDTO(&device, dto)
 
-	err = validateDeviceCallback(ctx, dic, dtos.FromDeviceModelToDTO(device))
+	deviceDTO := dtos.FromDeviceModelToDTO(device)
+	err = validateDeviceCallback(deviceDTO, dic)
 	if err != nil {
 		return errors.NewCommonEdgeXWrapper(err)
 	}
@@ -156,15 +172,22 @@ func PatchDevice(dto dtos.UpdateDevice, ctx context.Context, dic *di.Container) 
 		return errors.NewCommonEdgeXWrapper(err)
 	}
 
+	// If device is successfully updated, check each AutoEvent interval value and display a warning if it's smaller than the suggested 10ms value
+	for _, autoEvent := range device.AutoEvents {
+		utils.CheckMinInterval(autoEvent.Interval, minAutoEventInterval, lc)
+	}
+
 	lc.Debugf(
 		"Device patched on DB successfully. Correlation-ID: %s ",
 		correlation.FromContext(ctx),
 	)
 
 	if oldServiceName != "" {
-		go updateDeviceCallback(ctx, dic, oldServiceName, device)
+		go publishSystemEvent(common.DeviceSystemEventType, common.SystemEventActionUpdate, oldServiceName, deviceDTO, ctx, dic)
 	}
-	go updateDeviceCallback(ctx, dic, device.ServiceName, device)
+
+	go publishSystemEvent(common.DeviceSystemEventType, common.SystemEventActionUpdate, device.ServiceName, deviceDTO, ctx, dic)
+
 	return nil
 }
 
@@ -237,3 +260,5 @@ func DevicesByProfileName(offset int, limit int, profileName string, dic *di.Con
 	}
 	return devices, totalCount, nil
 }
+
+var noMessagingClientError = goErrors.New("MessageBus Client not available. Please update RequireMessageBus and MessageBus configuration to enable sending System Events via the EdgeX MessageBus")

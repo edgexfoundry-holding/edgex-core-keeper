@@ -1,38 +1,35 @@
 //
-// Copyright (C) 2021 IOTech Ltd
+// Copyright (C) 2021-2023 IOTech Ltd
+// Copyright (C) 2023 Intel Corporation
 //
 // SPDX-License-Identifier: Apache-2.0
 
 package command
 
 import (
-	"net/http"
-
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/container"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/di"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/common"
-	"github.com/gorilla/mux"
-
+	"github.com/edgexfoundry/edgex-go"
 	commandController "github.com/edgexfoundry/edgex-go/internal/core/command/controller/http"
-	commonController "github.com/edgexfoundry/edgex-go/internal/pkg/controller/http"
-	"github.com/edgexfoundry/edgex-go/internal/pkg/correlation"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/container"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/controller"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/handlers"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/di"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/common"
+
+	"github.com/labstack/echo/v4"
 )
 
-func LoadRestRoutes(r *mux.Router, dic *di.Container, serviceName string) {
+func LoadRestRoutes(r *echo.Echo, dic *di.Container, serviceName string) {
+	lc := container.LoggingClientFrom(dic.Get)
+	secretProvider := container.SecretProviderExtFrom(dic.Get)
+	authenticationHook := handlers.AutoConfigAuthenticationFunc(secretProvider, lc)
+
 	// Common
-	cc := commonController.NewCommonController(dic, serviceName)
-	r.HandleFunc(common.ApiPingRoute, cc.Ping).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiVersionRoute, cc.Version).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiConfigRoute, cc.Config).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiMetricsRoute, cc.Metrics).Methods(http.MethodGet)
+	_ = controller.NewCommonController(dic, r, serviceName, edgex.Version)
 
 	// Command
 	cmd := commandController.NewCommandController(dic)
-	r.HandleFunc(common.ApiAllDeviceRoute, cmd.AllCommands).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiDeviceByNameRoute, cmd.CommandsByDeviceName).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiDeviceNameCommandNameRoute, cmd.IssueGetCommandByName).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiDeviceNameCommandNameRoute, cmd.IssueSetCommandByName).Methods(http.MethodPut)
-
-	r.Use(correlation.ManageHeader)
-	r.Use(correlation.LoggingMiddleware(container.LoggingClientFrom(dic.Get)))
+	r.GET(common.ApiAllDeviceRoute, cmd.AllCommands, authenticationHook)
+	r.GET(common.ApiDeviceByNameEchoRoute, cmd.CommandsByDeviceName, authenticationHook)
+	r.GET(common.ApiDeviceNameCommandNameEchoRoute, cmd.IssueGetCommandByName, authenticationHook)
+	r.PUT(common.ApiDeviceNameCommandNameEchoRoute, cmd.IssueSetCommandByName, authenticationHook)
 }

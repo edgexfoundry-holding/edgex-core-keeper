@@ -1,6 +1,7 @@
 /*******************************************************************************
  * Copyright 2017 Dell Inc.
- * Copyright (c) 2019 Intel Corporation
+ * Copyright (c) 2023 Intel Corporation
+ * Copyright (C) 2023 IOTech Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
@@ -19,27 +20,25 @@ import (
 	"context"
 	"os"
 
-	"github.com/gorilla/mux"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/flags"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/handlers"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/interfaces"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/startup"
+	bootstrapConfig "github.com/edgexfoundry/go-mod-bootstrap/v3/config"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/di"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/common"
 
 	"github.com/edgexfoundry/edgex-go"
-	"github.com/edgexfoundry/edgex-go/internal"
 	"github.com/edgexfoundry/edgex-go/internal/core/data/application"
 	"github.com/edgexfoundry/edgex-go/internal/core/data/config"
 	"github.com/edgexfoundry/edgex-go/internal/core/data/container"
-	"github.com/edgexfoundry/edgex-go/internal/core/data/messaging"
 	pkgHandlers "github.com/edgexfoundry/edgex-go/internal/pkg/bootstrap/handlers"
-	"github.com/edgexfoundry/edgex-go/internal/pkg/telemetry"
 
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/flags"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/handlers"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/interfaces"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/startup"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/di"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/common"
+	"github.com/labstack/echo/v4"
 )
 
-func Main(ctx context.Context, cancel context.CancelFunc, router *mux.Router) {
+func Main(ctx context.Context, cancel context.CancelFunc, router *echo.Echo) {
 	startupTimer := startup.NewStartUpTimer(common.CoreDataServiceKey)
 
 	// All common command-line flags have been moved to DefaultCommonFlags. Service specific flags can be add here,
@@ -66,18 +65,18 @@ func Main(ctx context.Context, cancel context.CancelFunc, router *mux.Router) {
 		cancel,
 		f,
 		common.CoreDataServiceKey,
-		internal.ConfigStemCore,
+		common.ConfigStemCore,
 		configuration,
 		startupTimer,
 		dic,
 		true,
+		bootstrapConfig.ServiceTypeOther,
 		[]interfaces.BootstrapHandler{
-			pkgHandlers.NewDatabase(httpServer, configuration, container.DBClientInterfaceName).BootstrapHandler, // add v2 db client bootstrap handler
-			messaging.BootstrapHandler,
+			pkgHandlers.NewDatabase(httpServer, configuration, container.DBClientInterfaceName).BootstrapHandler, // add db client bootstrap handler
+			handlers.MessagingBootstrapHandler,
 			handlers.NewServiceMetrics(common.CoreDataServiceKey).BootstrapHandler, // Must be after Messaging
-			application.BootstrapHandler, // Must be after Service Metrics and before next handler
+			application.BootstrapHandler,                                           // Must be after Service Metrics and before next handler
 			NewBootstrap(router, common.CoreDataServiceKey).BootstrapHandler,
-			telemetry.BootstrapHandler,
 			httpServer.BootstrapHandler,
 			handlers.NewStartMessage(common.CoreDataServiceKey, edgex.Version).BootstrapHandler,
 		},

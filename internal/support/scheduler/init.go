@@ -23,21 +23,21 @@ import (
 	"github.com/edgexfoundry/edgex-go/internal/support/scheduler/application/scheduler"
 	"github.com/edgexfoundry/edgex-go/internal/support/scheduler/container"
 
-	bootstrapContainer "github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/container"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/startup"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/di"
+	bootstrapContainer "github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/container"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/startup"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/di"
 
-	"github.com/gorilla/mux"
+	"github.com/labstack/echo/v4"
 )
 
 // Bootstrap contains references to dependencies required by the BootstrapHandler.
 type Bootstrap struct {
-	router      *mux.Router
+	router      *echo.Echo
 	serviceName string
 }
 
 // NewBootstrap is a factory method that returns an initialized Bootstrap receiver struct.
-func NewBootstrap(router *mux.Router, serviceName string) *Bootstrap {
+func NewBootstrap(router *echo.Echo, serviceName string) *Bootstrap {
 	return &Bootstrap{
 		router:      router,
 		serviceName: serviceName,
@@ -49,10 +49,10 @@ func (b *Bootstrap) BootstrapHandler(ctx context.Context, wg *sync.WaitGroup, _ 
 	LoadRestRoutes(b.router, dic, b.serviceName)
 
 	lc := bootstrapContainer.LoggingClientFrom(dic.Get)
+	secretProvider := bootstrapContainer.SecretProviderExtFrom(dic.Get)
 	configuration := container.ConfigurationFrom(dic.Get)
 
-	// V2 Scheduler
-	schedulerManager := scheduler.NewManager(lc, configuration)
+	schedulerManager := scheduler.NewManager(lc, configuration, secretProvider)
 	dic.Update(di.ServiceConstructorMap{
 		container.SchedulerManagerName: func(get di.Get) interface{} {
 			return schedulerManager

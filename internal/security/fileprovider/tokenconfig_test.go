@@ -1,4 +1,3 @@
-//
 // Copyright (c) 2019 Intel Corporation
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
@@ -11,8 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under
 // the License.
 //
-// SPDX-License-Identifier: Apache-2.0'
-//
+// SPDX-License-Identifier: Apache-2.0
 package fileprovider
 
 import (
@@ -21,7 +19,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/edgexfoundry/go-mod-secrets/v2/pkg/token/fileioperformer/mocks"
+	"github.com/edgexfoundry/go-mod-secrets/v3/pkg/token/fileioperformer/mocks"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -57,7 +55,6 @@ func TestLoadTokenConfig(t *testing.T) {
 	var path = aService.CustomPolicy["path"].(map[string]interface{})
 	assert.Contains(t, path, "secret/non/standard/location/*")
 	// Don't need to go further down the type assertion rabbit hole to prove that this is working
-	assert.Contains(t, aService.CustomTokenParameters, "custom_option")
 }
 
 func TestLoadTokenConfigError1(t *testing.T) {

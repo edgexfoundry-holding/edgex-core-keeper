@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2020 IOTech Ltd
+// Copyright (C) 2020-2023 IOTech Ltd
 //
 // SPDX-License-Identifier: Apache-2.0
 
@@ -12,7 +12,7 @@ const (
 	TestDescription        = "TestDescription"
 	TestModel              = "TestModel"
 	TestDeviceResourceName = "TestDeviceResourceName"
-	TestTag                = "TestTag"
+	TestUnits              = "TestUnits"
 	TestDeviceCommandName  = "TestDeviceCommand"
 	TestDeviceName         = "TestDevice"
 	TestDeviceServiceName  = "TestDeviceServiceName"

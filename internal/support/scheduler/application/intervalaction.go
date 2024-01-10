@@ -12,14 +12,14 @@ import (
 	"github.com/edgexfoundry/edgex-go/internal/pkg/correlation"
 	"github.com/edgexfoundry/edgex-go/internal/support/scheduler/container"
 	"github.com/edgexfoundry/edgex-go/internal/support/scheduler/infrastructure/interfaces"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/dtos/requests"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/dtos/requests"
 
-	bootstrapContainer "github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/container"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/di"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/common"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/dtos"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/errors"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/models"
+	bootstrapContainer "github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/container"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/di"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/common"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/dtos"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/errors"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/models"
 )
 
 // The AddIntervalAction function accepts the new IntervalAction model from the controller function
@@ -28,12 +28,6 @@ func AddIntervalAction(action models.IntervalAction, ctx context.Context, dic *d
 	dbClient := container.DBClientFrom(dic.Get)
 	schedulerManager := container.SchedulerManagerFrom(dic.Get)
 	lc := bootstrapContainer.LoggingClientFrom(dic.Get)
-
-	// checks the interval existence by name
-	_, edgeXerr = dbClient.IntervalByName(action.IntervalName)
-	if edgeXerr != nil {
-		return id, errors.NewCommonEdgeXWrapper(edgeXerr)
-	}
 
 	addedAction, err := dbClient.AddIntervalAction(action)
 	if err != nil {
@@ -112,14 +106,6 @@ func PatchIntervalAction(dto dtos.UpdateIntervalAction, ctx context.Context, dic
 		return errors.NewCommonEdgeXWrapper(err)
 	}
 
-	// checks the interval existence by name
-	if dto.IntervalName != nil {
-		_, err = dbClient.IntervalByName(*dto.IntervalName)
-		if err != nil {
-			return errors.NewCommonEdgeXWrapper(err)
-		}
-	}
-
 	requests.ReplaceIntervalActionModelFieldsWithDTO(&action, dto)
 
 	err = dbClient.UpdateIntervalAction(action)
@@ -178,6 +164,7 @@ func LoadIntervalActionToSchedulerManager(dic *di.Container) errors.EdgeX {
 			Content:     configuration.IntervalActions[i].Content,
 			ContentType: configuration.IntervalActions[i].ContentType,
 			AdminState:  configuration.IntervalActions[i].AdminState,
+			AuthMethod:  configuration.IntervalActions[i].AuthMethod,
 		}
 		validateErr := common.Validate(dto)
 		if validateErr != nil {

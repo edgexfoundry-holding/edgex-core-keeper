@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright 2021 Intel Corporation
+ * Copyright 2023 Intel Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
@@ -22,12 +22,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path"
 	"strconv"
 	"testing"
 
-	"github.com/edgexfoundry/edgex-go/internal/security/bootstrapper/config"
 	"github.com/stretchr/testify/require"
+
+	"github.com/edgexfoundry/edgex-go/internal/security/bootstrapper/config"
 )
 
 type registryTestServer struct {
@@ -71,14 +73,47 @@ func (registry *registryTestServer) getRegistryServerConf(t *testing.T) *config.
 		{
 			"AccessorID":  "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
 			"Description": "some other type of agent token",
+			"SecretID":    "000000000000000000000000000",
+			"Policies": []map[string]interface{}{
+				{
+					"ID":   "0000",
+					"Name": "p1",
+				},
+				{
+					"ID":   "1111",
+					"Name": "p2",
+				},
+			},
 		},
 		{
 			"AccessorID":  "00000000-0000-0000-0000-000000000002",
 			"Description": "Anonymous Token",
+			"SecretID":    "11111111111111111111111111",
+			"Policies": []map[string]interface{}{
+				{
+					"ID":   "0000",
+					"Name": "p1",
+				},
+				{
+					"ID":   "1111",
+					"Name": "p2",
+				},
+			},
 		},
 		{
 			"AccessorID":  "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
 			"Description": "Bootstrap Token (Global Management)",
+			"SecretID":    "2222222222222222222222222",
+			"Policies": []map[string]interface{}{
+				{
+					"ID":   "0000",
+					"Name": "p1",
+				},
+				{
+					"ID":   "1111",
+					"Name": "p2",
+				},
+			},
 		},
 	}
 	respCnt := 0
@@ -126,7 +161,7 @@ func (registry *registryTestServer) getRegistryServerConf(t *testing.T) *config.
 			} else {
 				w.WriteHeader(http.StatusForbidden)
 			}
-		case fmt.Sprintf(createConsulRoleVaultAPI, pathBase):
+		case fmt.Sprintf("/v1/consul/roles/%s", pathBase):
 			require.Equal(t, http.MethodPost, r.Method)
 			if registry.serverOptions.createRoleOk {
 				w.WriteHeader(http.StatusNoContent)
@@ -184,6 +219,7 @@ func (registry *registryTestServer) getRegistryServerConf(t *testing.T) *config.
 				jsonResponse := map[string]interface{}{
 					"AccessorID":  testAgentTokenAccessorID,
 					"Description": "edgex-core-consul agent token",
+					"SecretID":    "12121212121212121212121",
 					"Policies": []map[string]interface{}{
 						{
 							"ID":   "00000000-0000-0000-0000-000000000001",
@@ -214,6 +250,7 @@ func (registry *registryTestServer) getRegistryServerConf(t *testing.T) *config.
 				jsonResponse := map[string]interface{}{
 					"AccessorID":  testAgentTokenAccessorID,
 					"Description": "edgex-core-consul agent token",
+					"SecretID":    "888888888888888888888888888888888888",
 					"Policies": []map[string]interface{}{
 						{
 							"ID":   "00000000-0000-0000-0000-000000000001",
@@ -238,7 +275,7 @@ func (registry *registryTestServer) getRegistryServerConf(t *testing.T) *config.
 				_, _ = w.Write([]byte("permission denied"))
 			} else {
 				w.WriteHeader(http.StatusInternalServerError)
-				t.Fatal(fmt.Sprintf("Unexpected method %s to URL %s", r.Method, r.URL.EscapedPath()))
+				t.Fatalf("Unexpected method %s to URL %s", r.Method, r.URL.EscapedPath())
 			}
 		case fmt.Sprintf(consulSetAgentTokenAPI, AgentType):
 			require.Equal(t, http.MethodPut, r.Method)
@@ -296,8 +333,24 @@ func (registry *registryTestServer) getRegistryServerConf(t *testing.T) *config.
 				w.WriteHeader(http.StatusInternalServerError)
 				_, _ = w.Write([]byte("Invalid Policy: A Policy with Name " + edgeXServicePolicyName + " already exists"))
 			}
+		case consulPolicyListAPI:
+			require.Equal(t, http.MethodGet, r.Method)
+			w.WriteHeader(http.StatusOK)
+			jsonResponse := []map[string]interface{}{
+				{
+					"Name": "global-management",
+				},
+				{
+					"Name": "node-read",
+				},
+				{
+					"Name": "test-policy-name",
+				},
+			}
+			err := json.NewEncoder(w).Encode(jsonResponse)
+			require.NoError(t, err)
 		default:
-			t.Fatal(fmt.Sprintf("Unexpected call to URL %s", r.URL.EscapedPath()))
+			t.Fatalf("Unexpected call to URL %s", r.URL.EscapedPath())
 		}
 	}))
 	tsURL, err := url.Parse(testSrv.URL)
@@ -309,10 +362,11 @@ func (registry *registryTestServer) getRegistryServerConf(t *testing.T) *config.
 	registryTestConf.StageGate.WaitFor.Timeout = "1m"
 	registryTestConf.StageGate.WaitFor.RetryInterval = "1s"
 	// for the sake of simplicity, we use the same test server as the secret store server
-	registryTestConf.SecretStore.Type = "vault"
-	registryTestConf.SecretStore.Protocol = tsURL.Scheme
-	registryTestConf.SecretStore.Host = tsURL.Hostname()
-	registryTestConf.SecretStore.Port = portNum
+	os.Setenv("SECRETSTORE_PROTOCOL", tsURL.Scheme)
+	os.Setenv("SECRETSTORE_HOST", tsURL.Hostname())
+	os.Setenv("SECRETSTORE_PORT", tsURL.Port())
+
 	registry.server = testSrv
 	return registryTestConf
+
 }

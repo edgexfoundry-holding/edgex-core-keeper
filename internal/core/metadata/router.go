@@ -1,88 +1,90 @@
 //
-// Copyright (C) 2021-2022 IOTech Ltd
+// Copyright (C) 2021-2023 IOTech Ltd
+// Copyright (C) 2023 Intel Corporation
 //
 // SPDX-License-Identifier: Apache-2.0
 
 package metadata
 
 import (
-	"net/http"
+	"github.com/edgexfoundry/edgex-go"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/container"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/controller"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/handlers"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/di"
 
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/container"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/di"
-	"github.com/gorilla/mux"
-
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/common"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/common"
 
 	metadataController "github.com/edgexfoundry/edgex-go/internal/core/metadata/controller/http"
-	commonController "github.com/edgexfoundry/edgex-go/internal/pkg/controller/http"
-	"github.com/edgexfoundry/edgex-go/internal/pkg/correlation"
+
+	"github.com/labstack/echo/v4"
 )
 
-func LoadRestRoutes(r *mux.Router, dic *di.Container, serviceName string) {
+func LoadRestRoutes(r *echo.Echo, dic *di.Container, serviceName string) {
+	lc := container.LoggingClientFrom(dic.Get)
+	secretProvider := container.SecretProviderExtFrom(dic.Get)
+	authenticationHook := handlers.AutoConfigAuthenticationFunc(secretProvider, lc)
+
 	// Common
-	cc := commonController.NewCommonController(dic, serviceName)
-	r.HandleFunc(common.ApiPingRoute, cc.Ping).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiVersionRoute, cc.Version).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiConfigRoute, cc.Config).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiMetricsRoute, cc.Metrics).Methods(http.MethodGet)
+	_ = controller.NewCommonController(dic, r, serviceName, edgex.Version)
+
+	// Units of Measure
+	uc := metadataController.NewUnitOfMeasureController(dic)
+	r.GET(common.ApiUnitsOfMeasureRoute, uc.UnitsOfMeasure, authenticationHook)
 
 	// Device Profile
 	dc := metadataController.NewDeviceProfileController(dic)
-	r.HandleFunc(common.ApiDeviceProfileRoute, dc.AddDeviceProfile).Methods(http.MethodPost)
-	r.HandleFunc(common.ApiDeviceProfileRoute, dc.UpdateDeviceProfile).Methods(http.MethodPut)
-	r.HandleFunc(common.ApiDeviceProfileUploadFileRoute, dc.AddDeviceProfileByYaml).Methods(http.MethodPost)
-	r.HandleFunc(common.ApiDeviceProfileUploadFileRoute, dc.UpdateDeviceProfileByYaml).Methods(http.MethodPut)
-	r.HandleFunc(common.ApiDeviceProfileByNameRoute, dc.DeviceProfileByName).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiDeviceProfileByNameRoute, dc.DeleteDeviceProfileByName).Methods(http.MethodDelete)
-	r.HandleFunc(common.ApiAllDeviceProfileRoute, dc.AllDeviceProfiles).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiDeviceProfileByModelRoute, dc.DeviceProfilesByModel).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiDeviceProfileByManufacturerRoute, dc.DeviceProfilesByManufacturer).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiDeviceProfileByManufacturerAndModelRoute, dc.DeviceProfilesByManufacturerAndModel).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiDeviceProfileBasicInfoRoute, dc.PatchDeviceProfileBasicInfo).Methods(http.MethodPatch)
+	r.POST(common.ApiDeviceProfileRoute, dc.AddDeviceProfile, authenticationHook)
+	r.PUT(common.ApiDeviceProfileRoute, dc.UpdateDeviceProfile, authenticationHook)
+	r.POST(common.ApiDeviceProfileUploadFileRoute, dc.AddDeviceProfileByYaml, authenticationHook)
+	r.PUT(common.ApiDeviceProfileUploadFileRoute, dc.UpdateDeviceProfileByYaml, authenticationHook)
+	r.GET(common.ApiDeviceProfileByNameEchoRoute, dc.DeviceProfileByName, authenticationHook)
+	r.DELETE(common.ApiDeviceProfileByNameEchoRoute, dc.DeleteDeviceProfileByName, authenticationHook)
+	r.GET(common.ApiAllDeviceProfileRoute, dc.AllDeviceProfiles, authenticationHook)
+	r.GET(common.ApiDeviceProfileByModelEchoRoute, dc.DeviceProfilesByModel, authenticationHook)
+	r.GET(common.ApiDeviceProfileByManufacturerEchoRoute, dc.DeviceProfilesByManufacturer, authenticationHook)
+	r.GET(common.ApiDeviceProfileByManufacturerAndModelEchoRoute, dc.DeviceProfilesByManufacturerAndModel, authenticationHook)
+	r.PATCH(common.ApiDeviceProfileBasicInfoRoute, dc.PatchDeviceProfileBasicInfo, authenticationHook)
 
 	// Device Resource
 	dr := metadataController.NewDeviceResourceController(dic)
-	r.HandleFunc(common.ApiDeviceResourceByProfileAndResourceRoute, dr.DeviceResourceByProfileNameAndResourceName).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiDeviceProfileResourceRoute, dr.AddDeviceProfileResource).Methods(http.MethodPost)
-	r.HandleFunc(common.ApiDeviceProfileResourceRoute, dr.PatchDeviceProfileResource).Methods(http.MethodPatch)
-	r.HandleFunc(common.ApiDeviceProfileResourceByNameRoute, dr.DeleteDeviceResourceByName).Methods(http.MethodDelete)
+	r.GET(common.ApiDeviceResourceByProfileAndResourceEchoRoute, dr.DeviceResourceByProfileNameAndResourceName, authenticationHook)
+	r.POST(common.ApiDeviceProfileResourceRoute, dr.AddDeviceProfileResource, authenticationHook)
+	r.PATCH(common.ApiDeviceProfileResourceRoute, dr.PatchDeviceProfileResource, authenticationHook)
+	r.DELETE(common.ApiDeviceProfileResourceByNameEchoRoute, dr.DeleteDeviceResourceByName, authenticationHook)
 
 	// Deivce Command
 	dcm := metadataController.NewDeviceCommandController(dic)
-	r.HandleFunc(common.ApiDeviceProfileDeviceCommandRoute, dcm.AddDeviceProfileDeviceCommand).Methods(http.MethodPost)
-	r.HandleFunc(common.ApiDeviceProfileDeviceCommandRoute, dcm.PatchDeviceProfileDeviceCommand).Methods(http.MethodPatch)
-	r.HandleFunc(common.ApiDeviceProfileDeviceCommandByNameRoute, dcm.DeleteDeviceCommandByName).Methods(http.MethodDelete)
+	r.POST(common.ApiDeviceProfileDeviceCommandRoute, dcm.AddDeviceProfileDeviceCommand, authenticationHook)
+	r.PATCH(common.ApiDeviceProfileDeviceCommandRoute, dcm.PatchDeviceProfileDeviceCommand, authenticationHook)
+	r.DELETE(common.ApiDeviceProfileDeviceCommandByNameEchoRoute, dcm.DeleteDeviceCommandByName, authenticationHook)
 
 	// Device Service
 	ds := metadataController.NewDeviceServiceController(dic)
-	r.HandleFunc(common.ApiDeviceServiceRoute, ds.AddDeviceService).Methods(http.MethodPost)
-	r.HandleFunc(common.ApiDeviceServiceRoute, ds.PatchDeviceService).Methods(http.MethodPatch)
-	r.HandleFunc(common.ApiDeviceServiceByNameRoute, ds.DeviceServiceByName).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiDeviceServiceByNameRoute, ds.DeleteDeviceServiceByName).Methods(http.MethodDelete)
-	r.HandleFunc(common.ApiAllDeviceServiceRoute, ds.AllDeviceServices).Methods(http.MethodGet)
+	r.POST(common.ApiDeviceServiceRoute, ds.AddDeviceService, authenticationHook)
+	r.PATCH(common.ApiDeviceServiceRoute, ds.PatchDeviceService, authenticationHook)
+	r.GET(common.ApiDeviceServiceByNameEchoRoute, ds.DeviceServiceByName, authenticationHook)
+	r.DELETE(common.ApiDeviceServiceByNameEchoRoute, ds.DeleteDeviceServiceByName, authenticationHook)
+	r.GET(common.ApiAllDeviceServiceRoute, ds.AllDeviceServices, authenticationHook)
 
 	// Device
 	d := metadataController.NewDeviceController(dic)
-	r.HandleFunc(common.ApiDeviceRoute, d.AddDevice).Methods(http.MethodPost)
-	r.HandleFunc(common.ApiDeviceByNameRoute, d.DeleteDeviceByName).Methods(http.MethodDelete)
-	r.HandleFunc(common.ApiDeviceByServiceNameRoute, d.DevicesByServiceName).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiDeviceNameExistsRoute, d.DeviceNameExists).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiDeviceRoute, d.PatchDevice).Methods(http.MethodPatch)
-	r.HandleFunc(common.ApiAllDeviceRoute, d.AllDevices).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiDeviceByNameRoute, d.DeviceByName).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiDeviceByProfileNameRoute, d.DevicesByProfileName).Methods(http.MethodGet)
+	r.POST(common.ApiDeviceRoute, d.AddDevice, authenticationHook)
+	r.DELETE(common.ApiDeviceByNameEchoRoute, d.DeleteDeviceByName, authenticationHook)
+	r.GET(common.ApiDeviceByServiceNameEchoRoute, d.DevicesByServiceName, authenticationHook)
+	r.GET(common.ApiDeviceNameExistsEchoRoute, d.DeviceNameExists, authenticationHook)
+	r.PATCH(common.ApiDeviceRoute, d.PatchDevice, authenticationHook)
+	r.GET(common.ApiAllDeviceRoute, d.AllDevices, authenticationHook)
+	r.GET(common.ApiDeviceByNameEchoRoute, d.DeviceByName, authenticationHook)
+	r.GET(common.ApiDeviceByProfileNameEchoRoute, d.DevicesByProfileName, authenticationHook)
 
 	// ProvisionWatcher
 	pwc := metadataController.NewProvisionWatcherController(dic)
-	r.HandleFunc(common.ApiProvisionWatcherRoute, pwc.AddProvisionWatcher).Methods(http.MethodPost)
-	r.HandleFunc(common.ApiProvisionWatcherByNameRoute, pwc.ProvisionWatcherByName).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiProvisionWatcherByServiceNameRoute, pwc.ProvisionWatchersByServiceName).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiProvisionWatcherByProfileNameRoute, pwc.ProvisionWatchersByProfileName).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiAllProvisionWatcherRoute, pwc.AllProvisionWatchers).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiProvisionWatcherByNameRoute, pwc.DeleteProvisionWatcherByName).Methods(http.MethodDelete)
-	r.HandleFunc(common.ApiProvisionWatcherRoute, pwc.PatchProvisionWatcher).Methods(http.MethodPatch)
-
-	r.Use(correlation.ManageHeader)
-	r.Use(correlation.LoggingMiddleware(container.LoggingClientFrom(dic.Get)))
+	r.POST(common.ApiProvisionWatcherRoute, pwc.AddProvisionWatcher, authenticationHook)
+	r.GET(common.ApiProvisionWatcherByNameEchoRoute, pwc.ProvisionWatcherByName, authenticationHook)
+	r.GET(common.ApiProvisionWatcherByServiceNameEchoRoute, pwc.ProvisionWatchersByServiceName, authenticationHook)
+	r.GET(common.ApiProvisionWatcherByProfileNameEchoRoute, pwc.ProvisionWatchersByProfileName, authenticationHook)
+	r.GET(common.ApiAllProvisionWatcherRoute, pwc.AllProvisionWatchers, authenticationHook)
+	r.DELETE(common.ApiProvisionWatcherByNameEchoRoute, pwc.DeleteProvisionWatcherByName, authenticationHook)
+	r.PATCH(common.ApiProvisionWatcherRoute, pwc.PatchProvisionWatcher, authenticationHook)
 }

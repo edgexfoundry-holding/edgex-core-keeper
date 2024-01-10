@@ -1,6 +1,6 @@
 #!/usr/bin/dumb-init /bin/sh
 #  ----------------------------------------------------------------------------------
-#  Copyright (c) 2020 Intel Corporation
+#  Copyright (c) 2022 Intel Corporation
 #
 #  Licensed under the Apache License, Version 2.0 (the "License");
 #  you may not use this file except in compliance with the License.
@@ -19,7 +19,16 @@
 
 set -e
 
-# env settings are populated from env files of docker-compose
+# EDGEX_SECRETS_ROOT should default to /tmp/edgex/secrets
+# unless changed in configuration.yaml or overridden by environment variable
+EDGEX_SECRETS_ROOT=`yq -r .TokenFileProvider.OutputDir /res-file-token-provider/configuration.yaml`
+if [ ! -z "${TOKENFILEPROVIDER_OUTPUTDIR}" ]; then
+  EDGEX_SECRETS_ROOT="${TOKENFILEPROVIDER_OUTPUTDIR}"
+fi
+
+# create token dir, and assign perms
+mkdir -p /vault/config/assets
+chown -Rh 100:1000 /vault/
 
 echo "Initializing secret store..."
 /security-secretstore-setup --vaultInterval=10
@@ -32,11 +41,11 @@ fi
 
 # /tmp/edgex/secrets need to be shared with all other services that need secrets and
 # thus change the ownership to EDGEX_USER:EDGEX_GROUP
-echo "$(date) Changing ownership of secrets to ${EDGEX_USER}:${EDGEX_GROUP}"
-chown -Rh ${EDGEX_USER}:${EDGEX_GROUP} /tmp/edgex/secrets
+echo "$(date) Changing ownership of ${EDGEX_SECRETS_ROOT} to ${EDGEX_USER}:${EDGEX_GROUP}"
+chown -Rh ${EDGEX_USER}:${EDGEX_GROUP} "${EDGEX_SECRETS_ROOT}"
 
 # Signal tokens ready port for other services waiting on
-exec su-exec ${EDGEX_USER} /edgex-init/security-bootstrapper --confdir=/edgex-init/res listenTcp \
+exec su-exec ${EDGEX_USER} /edgex-init/security-bootstrapper --configDir=/edgex-init/res listenTcp \
   --port="${STAGEGATE_SECRETSTORESETUP_TOKENS_READYPORT}" --host="${STAGEGATE_SECRETSTORESETUP_HOST}"
 if [ $? -ne 0 ]; then
   echo "$(date) failed to gating the tokens ready port"

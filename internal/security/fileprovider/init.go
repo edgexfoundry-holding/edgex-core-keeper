@@ -23,31 +23,23 @@ import (
 
 	"github.com/edgexfoundry/edgex-go/internal"
 	"github.com/edgexfoundry/edgex-go/internal/security/fileprovider/container"
-	"github.com/edgexfoundry/go-mod-secrets/v2/pkg"
-	"github.com/edgexfoundry/go-mod-secrets/v2/pkg/types"
-	"github.com/edgexfoundry/go-mod-secrets/v2/secrets"
+	"github.com/edgexfoundry/go-mod-secrets/v3/pkg"
+	"github.com/edgexfoundry/go-mod-secrets/v3/pkg/types"
+	"github.com/edgexfoundry/go-mod-secrets/v3/secrets"
 
-	bootstrapContainer "github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/container"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/startup"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/di"
+	bootstrapContainer "github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/container"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/startup"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/di"
 
-	"github.com/edgexfoundry/go-mod-secrets/v2/pkg/token/authtokenloader"
-	"github.com/edgexfoundry/go-mod-secrets/v2/pkg/token/fileioperformer"
+	"github.com/edgexfoundry/go-mod-secrets/v3/pkg/token/authtokenloader"
+	"github.com/edgexfoundry/go-mod-secrets/v3/pkg/token/fileioperformer"
 )
 
 type Bootstrap struct {
-	exitCode int
 }
 
 func NewBootstrap() *Bootstrap {
-	return &Bootstrap{
-		exitCode: 0,
-	}
-}
-
-// ExitCode returns desired exit code of program
-func (b *Bootstrap) ExitCode() int {
-	return b.exitCode
+	return &Bootstrap{}
 }
 
 // BootstrapHandler fulfills the BootstrapHandler contract and performs initialization needed by the data service.
@@ -81,7 +73,6 @@ func (b *Bootstrap) BootstrapHandler(_ context.Context, _ *sync.WaitGroup, _ sta
 	client, err := secrets.NewSecretStoreClient(clientConfig, lc, requester)
 	if err != nil {
 		lc.Errorf("error occurred creating SecretStoreClient: %s", err.Error())
-		b.exitCode = 1
 		return false
 	}
 
@@ -92,8 +83,8 @@ func (b *Bootstrap) BootstrapHandler(_ context.Context, _ *sync.WaitGroup, _ sta
 
 	if err != nil {
 		lc.Errorf("error occurred generating tokens: %s", err.Error())
-		b.exitCode = 1
+		return false
 	}
 
-	return false // Tell bootstrap.Run() to exit wait loop and terminate
+	return true
 }

@@ -27,7 +27,7 @@ import (
 	"github.com/edgexfoundry/edgex-go/internal/security/bootstrapper/interfaces"
 	"github.com/edgexfoundry/edgex-go/internal/security/bootstrapper/tcp"
 
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/clients/logger"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/clients/logger"
 )
 
 const (
@@ -59,7 +59,7 @@ func NewCommand(
 	var dummy string
 
 	flagSet := flag.NewFlagSet(CommandName, flag.ContinueOnError)
-	flagSet.StringVar(&dummy, "confdir", "", "") // handled by bootstrap; duplicated here to prevent arg parsing errors
+	flagSet.StringVar(&dummy, "configDir", "", "") // handled by bootstrap; duplicated here to prevent arg parsing errors
 
 	err := flagSet.Parse(args)
 	if err != nil {
@@ -93,16 +93,6 @@ func (c *cmd) Execute() (statusCode int, err error) {
 		return interfaces.StatusCodeExitWithError, retErr
 	}
 	c.loggingClient.Info("Registry is ready")
-
-	if err := tcp.DialTcp(
-		c.config.StageGate.KongDB.Host,
-		c.config.StageGate.KongDB.ReadyPort,
-		c.loggingClient); err != nil {
-		retErr := fmt.Errorf("found error while waiting for readiness of KongDB at %s:%d, err: %v",
-			c.config.StageGate.KongDB.Host, c.config.StageGate.KongDB.ReadyPort, err)
-		return interfaces.StatusCodeExitWithError, retErr
-	}
-	c.loggingClient.Info("KongDB is ready")
 
 	if err := tcp.DialTcp(
 		c.config.StageGate.Database.Host,

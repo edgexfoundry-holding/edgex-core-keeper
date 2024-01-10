@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright 2021 Intel Corporation
+ * Copyright 2023 Intel Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
@@ -22,7 +22,7 @@ import (
 
 	"github.com/edgexfoundry/edgex-go/internal"
 
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/flags"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/flags"
 )
 
 // commonFlags is a custom implementation of flags.Common from go-mod-bootstrap
@@ -38,7 +38,7 @@ func NewCommonFlags() flags.Common {
 
 // Parse parses the command-line arguments
 func (f *commonFlags) Parse(_ []string) {
-	flag.StringVar(&f.configDir, "confdir", "", "")
+	flag.StringVar(&f.configDir, "configDir", "", "")
 	flag.Usage = HelpCallback
 
 	flag.Parse()
@@ -55,7 +55,12 @@ func (f *commonFlags) Parse(_ []string) {
 
 // ConfigFileName returns the name of the local configuration file
 func (f *commonFlags) ConfigFileName() string {
-	return internal.ConfigFileName
+	return flags.DefaultConfigFile
+}
+
+// CommonConfig returns an empty string since common config is not used
+func (f *commonFlags) CommonConfig() string {
+	return ""
 }
 
 // OverwriteConfig returns false since the Configuration provider is not used
@@ -68,6 +73,11 @@ func (f *commonFlags) UseRegistry() bool {
 	return false
 }
 
+// InDevMode returns false since dev mode is not used
+func (f *commonFlags) InDevMode() bool {
+	return false
+}
+
 // ConfigProviderUrl returns the empty url since Configuration Provider is not used.
 func (f *commonFlags) ConfigProviderUrl() string {
 	return ""
@@ -76,6 +86,11 @@ func (f *commonFlags) ConfigProviderUrl() string {
 // Profile returns the empty name since profile is not used
 func (f *commonFlags) Profile() string {
 	return ""
+}
+
+// RemoteServiceHosts returns nil list since is not used in this service
+func (f *commonFlags) RemoteServiceHosts() []string {
+	return nil
 }
 
 // ConfigDirectory returns the directory where the config file(s) are located, if it was specified.
@@ -94,7 +109,7 @@ func HelpCallback() {
 		"Usage: %s [options] <command> [arg...]\n"+
 			"Options:\n"+
 			"    -h, --help    Show this message\n"+
-			"    --confdir     Specify local configuration directory\n"+
+			"    --configDir     Specify local configuration directory\n"+
 			"\n"+
 			"Commands:\n"+
 			"    gate              Do security bootstrapper gating on stages while starting services\n"+
@@ -102,7 +117,6 @@ func HelpCallback() {
 			"    getHttpStatus     Do an HTTP GET call to get the status code\n"+
 			"    help              Show available commands (this text)\n"+
 			"    listenTcp         Start up a TCP listener\n"+
-			"    pingPgDb          Test Postgres database readiness\n"+
 			"    setupRegistryACL  Set up registry's ACL and configure the access\n"+
 			"    waitFor           Wait for the other services with specified URI(s) to connect:\n"+
 			"                      the URI(s) can be communication protocols like tcp/tcp4/tcp6/http/https or files\n",

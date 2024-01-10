@@ -1,6 +1,6 @@
 #  ----------------------------------------------------------------------------------
 #  Copyright 2019 Dell Technologies, Inc.
-#  Copyright 2020 Intel Corp.
+#  Copyright 2022-2023 Intel Corporation
 #
 #  Licensed under the Apache License, Version 2.0 (the "License");
 #  you may not use this file except in compliance with the License.
@@ -16,12 +16,10 @@
 # 
 #  ----------------------------------------------------------------------------------
 
-ARG BUILDER_BASE=golang:1.17-alpine3.15
+ARG BUILDER_BASE=golang:1.21-alpine3.18
 FROM ${BUILDER_BASE} AS builder
 
 WORKDIR /edgex-go
-
-RUN sed -e 's/dl-cdn[.]alpinelinux.org/nl.alpinelinux.org/g' -i~ /etc/apk/repositories
 
 RUN apk add --update --no-cache make git
 
@@ -32,28 +30,30 @@ COPY . .
 RUN make cmd/security-file-token-provider/security-file-token-provider \
   cmd/security-secretstore-setup/security-secretstore-setup
 
-FROM alpine:3.14
+FROM alpine:3.18
 
-RUN apk add --update --no-cache ca-certificates dumb-init su-exec
+RUN apk add --update --no-cache ca-certificates dumb-init su-exec yq
+# Ensure using latest versions of all installed packages to avoid any recent CVEs
+RUN apk --no-cache upgrade
 
 LABEL license='SPDX-License-Identifier: Apache-2.0' \
-      copyright='Copyright (c) 2019: Dell Technologies, Inc.'
+      copyright='Copyright (c) 2019: Dell Technologies, Inc.; Copyright (C) 2023 Intel Corporation'
 
 WORKDIR /
 
+COPY --from=builder /edgex-go/Attribution.txt /
+COPY --from=builder /edgex-go/security.txt /
+
 COPY --from=builder /edgex-go/cmd/security-file-token-provider/res/token-config.json /res-file-token-provider/token-config.json
-COPY --from=builder /edgex-go/cmd/security-secretstore-setup/res-file-token-provider/configuration.toml  /res-file-token-provider/configuration.toml
-COPY --from=builder /edgex-go/cmd/security-secretstore-setup/res/configuration.toml /res/configuration.toml
-COPY --from=builder /edgex-go/cmd/security-secretstore-setup/res/kong-admin-config.template.yml /res/kong-admin-config.template.yml
+COPY --from=builder /edgex-go/cmd/security-secretstore-setup/res-file-token-provider/configuration.yaml  /res-file-token-provider/configuration.yaml
+COPY --from=builder /edgex-go/cmd/security-secretstore-setup/res/configuration.yaml /res/configuration.yaml
 
 COPY --from=builder /edgex-go/cmd/security-file-token-provider/security-file-token-provider .
 COPY --from=builder /edgex-go/cmd/security-secretstore-setup/security-secretstore-setup .
 
-# Setup the entry point script, create token dir, and assign perms
+# Setup the entry point script
 COPY --from=builder /edgex-go/cmd/security-secretstore-setup/entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/entrypoint.sh \
-    && ln -s /usr/local/bin/entrypoint.sh / \
-    && mkdir -p /vault/config/assets \
-    && chown -Rh 100:1000 /vault/    
+    && ln -s /usr/local/bin/entrypoint.sh /
 
 ENTRYPOINT ["entrypoint.sh"]

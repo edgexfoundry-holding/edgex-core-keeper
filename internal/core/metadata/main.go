@@ -1,5 +1,7 @@
 /*******************************************************************************
  * Copyright 2018 Dell Inc.
+ * Copyright 2023 Intel Corporation
+ * Copyright 2023 IOTech Ltd.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
@@ -19,23 +21,25 @@ import (
 	"os"
 
 	"github.com/edgexfoundry/edgex-go"
-	"github.com/edgexfoundry/edgex-go/internal"
 	"github.com/edgexfoundry/edgex-go/internal/core/metadata/config"
 	"github.com/edgexfoundry/edgex-go/internal/core/metadata/container"
+	"github.com/edgexfoundry/edgex-go/internal/core/metadata/uom"
 	pkgHandlers "github.com/edgexfoundry/edgex-go/internal/pkg/bootstrap/handlers"
-	"github.com/edgexfoundry/edgex-go/internal/pkg/telemetry"
 
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/flags"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/handlers"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/interfaces"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/startup"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/di"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/common"
-	"github.com/gorilla/mux"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/common"
+
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/flags"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/handlers"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/interfaces"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/startup"
+	bootstrapConfig "github.com/edgexfoundry/go-mod-bootstrap/v3/config"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/di"
+
+	"github.com/labstack/echo/v4"
 )
 
-func Main(ctx context.Context, cancel context.CancelFunc, router *mux.Router) {
+func Main(ctx context.Context, cancel context.CancelFunc, router *echo.Echo) {
 	startupTimer := startup.NewStartUpTimer(common.CoreMetaDataServiceKey)
 
 	// All common command-line flags have been moved to DefaultCommonFlags. Service specific flags can be add here,
@@ -57,43 +61,25 @@ func Main(ctx context.Context, cancel context.CancelFunc, router *mux.Router) {
 
 	httpServer := handlers.NewHttpServer(router, true)
 
-	wg, deferred, success := bootstrap.RunAndReturnWaitGroup(
+	bootstrap.Run(
 		ctx,
 		cancel,
 		f,
 		common.CoreMetaDataServiceKey,
-		internal.ConfigStemCore,
+		common.ConfigStemCore,
 		configuration,
-		nil,
 		startupTimer,
 		dic,
 		true,
+		bootstrapConfig.ServiceTypeOther,
 		[]interfaces.BootstrapHandler{
-			pkgHandlers.NewDatabase(httpServer, configuration, container.DBClientInterfaceName).BootstrapHandler, // add v2 db client bootstrap handler
+			uom.BootstrapHandler,
+			pkgHandlers.NewDatabase(httpServer, configuration, container.DBClientInterfaceName).BootstrapHandler, // add db client bootstrap handler
+			handlers.MessagingBootstrapHandler,
+			handlers.NewServiceMetrics(common.CoreMetaDataServiceKey).BootstrapHandler, // Must be after Messaging
 			NewBootstrap(router, common.CoreMetaDataServiceKey).BootstrapHandler,
-			telemetry.BootstrapHandler,
 			httpServer.BootstrapHandler,
-		})
-
-	if !success {
-		return
-	}
-
-	// Have to call this handler outside the bootstrapping when configuration is loaded and known
-	configuration = container.ConfigurationFrom(dic.Get)
-	// Only create Notifications Client if going to be using it
-	if configuration.Notifications.PostDeviceChanges {
-		if !handlers.NewClientsBootstrap().BootstrapHandler(ctx, wg, startupTimer, dic) {
-			return
-		}
-	}
-
-	// Call this handler outside the bootstrapping, so it is always last.
-	handlers.NewStartMessage(common.CoreMetaDataServiceKey, edgex.Version).BootstrapHandler(ctx, wg, startupTimer, dic)
-
-	wg.Wait()
-
-	if deferred != nil {
-		deferred()
-	}
+			handlers.NewStartMessage(common.CoreMetaDataServiceKey, edgex.Version).BootstrapHandler,
+		},
+	)
 }

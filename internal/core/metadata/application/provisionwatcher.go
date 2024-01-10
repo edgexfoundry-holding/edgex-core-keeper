@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2021 IOTech Ltd
+// Copyright (C) 2021-2023 IOTech Ltd
 //
 // SPDX-License-Identifier: Apache-2.0
 
@@ -13,12 +13,13 @@ import (
 	"github.com/edgexfoundry/edgex-go/internal/core/metadata/infrastructure/interfaces"
 	"github.com/edgexfoundry/edgex-go/internal/pkg/correlation"
 
-	bootstrapContainer "github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/container"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/di"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/dtos"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/dtos/requests"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/errors"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/models"
+	bootstrapContainer "github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/container"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/di"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/common"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/dtos"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/dtos/requests"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/errors"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/models"
 )
 
 // AddProvisionWatcher function accepts the new provision watcher model from the controller function
@@ -27,19 +28,6 @@ func AddProvisionWatcher(pw models.ProvisionWatcher, ctx context.Context, dic *d
 	dbClient := container.DBClientFrom(dic.Get)
 	lc := bootstrapContainer.LoggingClientFrom(dic.Get)
 	correlationId := correlation.FromContext(ctx)
-
-	exists, err := dbClient.DeviceServiceNameExists(pw.ServiceName)
-	if err != nil {
-		return "", errors.NewCommonEdgeXWrapper(err)
-	} else if !exists {
-		return "", errors.NewCommonEdgeX(errors.KindEntityDoesNotExist, fmt.Sprintf("device service '%s' does not exists", pw.ServiceName), nil)
-	}
-	exists, err = dbClient.DeviceProfileNameExists(pw.ProfileName)
-	if err != nil {
-		return "", errors.NewCommonEdgeXWrapper(err)
-	} else if !exists {
-		return "", errors.NewCommonEdgeX(errors.KindEntityDoesNotExist, fmt.Sprintf("device profile '%s' does not exists", pw.ProfileName), nil)
-	}
 
 	addProvisionWatcher, err := dbClient.AddProvisionWatcher(pw)
 	if err != nil {
@@ -50,7 +38,7 @@ func AddProvisionWatcher(pw models.ProvisionWatcher, ctx context.Context, dic *d
 		addProvisionWatcher.Id,
 		correlationId,
 	)
-	go addProvisionWatcherCallback(ctx, dic, dtos.FromProvisionWatcherModelToDTO(pw))
+	go publishSystemEvent(common.ProvisionWatcherSystemEventType, common.SystemEventActionAdd, pw.ServiceName, dtos.FromProvisionWatcherModelToDTO(pw), ctx, dic)
 	return addProvisionWatcher.Id, nil
 }
 
@@ -143,7 +131,7 @@ func DeleteProvisionWatcherByName(ctx context.Context, name string, dic *di.Cont
 	if err != nil {
 		return errors.NewCommonEdgeXWrapper(err)
 	}
-	go deleteProvisionWatcherCallback(ctx, dic, pw)
+	go publishSystemEvent(common.ProvisionWatcherSystemEventType, common.SystemEventActionDelete, pw.ServiceName, dtos.FromProvisionWatcherModelToDTO(pw), ctx, dic)
 	return nil
 }
 
@@ -151,23 +139,6 @@ func DeleteProvisionWatcherByName(ctx context.Context, name string, dic *di.Cont
 func PatchProvisionWatcher(ctx context.Context, dto dtos.UpdateProvisionWatcher, dic *di.Container) errors.EdgeX {
 	dbClient := container.DBClientFrom(dic.Get)
 	lc := bootstrapContainer.LoggingClientFrom(dic.Get)
-
-	if dto.ServiceName != nil {
-		exists, edgeXerr := dbClient.DeviceServiceNameExists(*dto.ServiceName)
-		if edgeXerr != nil {
-			return errors.NewCommonEdgeX(errors.Kind(edgeXerr), fmt.Sprintf("device service '%s' existence check failed", *dto.ServiceName), edgeXerr)
-		} else if !exists {
-			return errors.NewCommonEdgeX(errors.KindEntityDoesNotExist, fmt.Sprintf("device service '%s' does not exist", *dto.ServiceName), nil)
-		}
-	}
-	if dto.ProfileName != nil {
-		exists, edgeXerr := dbClient.DeviceProfileNameExists(*dto.ProfileName)
-		if edgeXerr != nil {
-			return errors.NewCommonEdgeX(errors.Kind(edgeXerr), fmt.Sprintf("device profile '%s' existence check failed", *dto.ProfileName), edgeXerr)
-		} else if !exists {
-			return errors.NewCommonEdgeX(errors.KindEntityDoesNotExist, fmt.Sprintf("device profile '%s' does not exist", *dto.ProfileName), nil)
-		}
-	}
 
 	pw, err := provisionWatcherByDTO(dbClient, dto)
 	if err != nil {
@@ -190,9 +161,9 @@ func PatchProvisionWatcher(ctx context.Context, dto dtos.UpdateProvisionWatcher,
 	lc.Debugf("ProvisionWatcher patched on DB successfully. Correlation-ID: %s ", correlation.FromContext(ctx))
 
 	if oldServiceName != "" {
-		go updateProvisionWatcherCallback(ctx, dic, oldServiceName, pw)
+		go publishSystemEvent(common.ProvisionWatcherSystemEventType, common.SystemEventActionUpdate, oldServiceName, dtos.FromProvisionWatcherModelToDTO(pw), ctx, dic)
 	}
-	go updateProvisionWatcherCallback(ctx, dic, pw.ServiceName, pw)
+	go publishSystemEvent(common.ProvisionWatcherSystemEventType, common.SystemEventActionUpdate, pw.ServiceName, dtos.FromProvisionWatcherModelToDTO(pw), ctx, dic)
 	return nil
 }
 

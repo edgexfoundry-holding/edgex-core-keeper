@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2021 Intel Corporation
+* Copyright 2023 Intel Corporation
 * Copyright 2020 Redis Labs
 *
 * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
@@ -27,13 +27,12 @@ import (
 	"github.com/edgexfoundry/edgex-go/internal/security/bootstrapper/helper"
 	"github.com/edgexfoundry/edgex-go/internal/security/bootstrapper/redis/container"
 
-	bootstrapContainer "github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/container"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/secret"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/startup"
-	bootstrapConfig "github.com/edgexfoundry/go-mod-bootstrap/v2/config"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/di"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/clients/logger"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/common"
+	bootstrapContainer "github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/container"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/secret"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/startup"
+	bootstrapConfig "github.com/edgexfoundry/go-mod-bootstrap/v3/config"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/di"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/clients/logger"
 )
 
 const (
@@ -68,7 +67,7 @@ func (handler *Handler) GetCredentials(ctx context.Context, _ *sync.WaitGroup, s
 
 	for startupTimer.HasNotElapsed() {
 		// retrieve database credentials from secretstore
-		secrets, err := secretProvider.GetSecret(config.Databases[common.Primary].Type)
+		secrets, err := secretProvider.GetSecret(config.Database.Type)
 		if err == nil {
 			credentials.Username = secrets[secret.UsernameKey]
 			credentials.Password = secrets[secret.PasswordKey]
@@ -125,7 +124,7 @@ func (handler *Handler) SetupConfFiles(ctx context.Context, _ *sync.WaitGroup, _
 
 	edgeXRedisACLFilePath := filepath.Join(dbConfigDir, redisACLFileName)
 	// writing the config file
-	if err := helper.GenerateRedisConfig(confFile, edgeXRedisACLFilePath); err != nil {
+	if err := helper.GenerateRedisConfig(confFile, edgeXRedisACLFilePath, config.DatabaseConfig.MaxClients); err != nil {
 		lc.Errorf("cannot write the db config file %s: %v", confFile.Name(), err)
 		return false
 	}
