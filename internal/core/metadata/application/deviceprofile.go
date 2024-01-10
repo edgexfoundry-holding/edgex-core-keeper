@@ -9,18 +9,18 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/dtos/requests"
-
 	"github.com/edgexfoundry/edgex-go/internal/core/metadata/container"
 	"github.com/edgexfoundry/edgex-go/internal/core/metadata/infrastructure/interfaces"
 	"github.com/edgexfoundry/edgex-go/internal/pkg/correlation"
 
-	bootstrapContainer "github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/container"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/di"
+	bootstrapContainer "github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/container"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/di"
 
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/dtos"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/errors"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/models"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/common"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/dtos"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/dtos/requests"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/errors"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/models"
 )
 
 // The AddDeviceProfile function accepts the new device profile model from the controller functions
@@ -28,6 +28,11 @@ import (
 func AddDeviceProfile(d models.DeviceProfile, ctx context.Context, dic *di.Container) (id string, err errors.EdgeX) {
 	dbClient := container.DBClientFrom(dic.Get)
 	lc := bootstrapContainer.LoggingClientFrom(dic.Get)
+
+	err = deviceProfileUoMValidation(d, dic)
+	if err != nil {
+		return "", errors.NewCommonEdgeXWrapper(err)
+	}
 
 	correlationId := correlation.FromContext(ctx)
 	addedDeviceProfile, err := dbClient.AddDeviceProfile(d)
@@ -41,6 +46,9 @@ func AddDeviceProfile(d models.DeviceProfile, ctx context.Context, dic *di.Conta
 		correlationId,
 	)
 
+	profileDTO := dtos.FromDeviceProfileModelToDTO(addedDeviceProfile)
+	go publishSystemEvent(common.DeviceProfileSystemEventType, common.SystemEventActionAdd, common.CoreMetaDataServiceKey, profileDTO, ctx, dic)
+
 	return addedDeviceProfile.Id, nil
 }
 
@@ -49,6 +57,11 @@ func AddDeviceProfile(d models.DeviceProfile, ctx context.Context, dic *di.Conta
 func UpdateDeviceProfile(d models.DeviceProfile, ctx context.Context, dic *di.Container) (err errors.EdgeX) {
 	dbClient := container.DBClientFrom(dic.Get)
 	lc := bootstrapContainer.LoggingClientFrom(dic.Get)
+
+	err = deviceProfileUoMValidation(d, dic)
+	if err != nil {
+		return errors.NewCommonEdgeXWrapper(err)
+	}
 
 	err = dbClient.UpdateDeviceProfile(d)
 	if err != nil {
@@ -59,7 +72,15 @@ func UpdateDeviceProfile(d models.DeviceProfile, ctx context.Context, dic *di.Co
 		"DeviceProfile updated on DB successfully. Correlation-id: %s ",
 		correlation.FromContext(ctx),
 	)
-	go updateDeviceProfileCallback(ctx, dic, dtos.FromDeviceProfileModelToDTO(d))
+
+	profile, err := dbClient.DeviceProfileByName(d.Name)
+	if err != nil {
+		return errors.NewCommonEdgeXWrapper(err)
+	}
+
+	profileDTO := dtos.FromDeviceProfileModelToDTO(profile)
+	go publishUpdateDeviceProfileSystemEvent(profileDTO, ctx, dic)
+
 	return nil
 }
 
@@ -87,27 +108,18 @@ func DeleteDeviceProfileByName(name string, ctx context.Context, dic *di.Contain
 		return errors.NewCommonEdgeX(errors.KindContractInvalid, "name is empty", nil)
 	}
 	dbClient := container.DBClientFrom(dic.Get)
-
-	// Check the associated Device and ProvisionWatcher existence
-	devices, err := dbClient.DevicesByProfileName(0, 1, name)
+	profile, err := dbClient.DeviceProfileByName(name)
 	if err != nil {
 		return errors.NewCommonEdgeXWrapper(err)
 	}
-	if len(devices) > 0 {
-		return errors.NewCommonEdgeX(errors.KindStatusConflict, "fail to delete the device profile when associated device exists", nil)
-	}
-	provisionWatchers, err := dbClient.ProvisionWatchersByProfileName(0, 1, name)
-	if err != nil {
-		return errors.NewCommonEdgeXWrapper(err)
-	}
-	if len(provisionWatchers) > 0 {
-		return errors.NewCommonEdgeX(errors.KindStatusConflict, "fail to delete the device profile when associated provisionWatcher exists", nil)
-	}
-
 	err = dbClient.DeleteDeviceProfileByName(name)
 	if err != nil {
 		return errors.NewCommonEdgeXWrapper(err)
 	}
+
+	profileDTO := dtos.FromDeviceProfileModelToDTO(profile)
+	go publishSystemEvent(common.DeviceProfileSystemEventType, common.SystemEventActionDelete, common.CoreMetaDataServiceKey, profileDTO, ctx, dic)
+
 	return nil
 }
 
@@ -208,6 +220,9 @@ func PatchDeviceProfileBasicInfo(ctx context.Context, dto dtos.UpdateDeviceProfi
 		correlation.FromContext(ctx),
 	)
 
+	profileDTO := dtos.FromDeviceProfileModelToDTO(deviceProfile)
+	go publishUpdateDeviceProfileSystemEvent(profileDTO, ctx, dic)
+
 	return nil
 }
 
@@ -228,4 +243,17 @@ func deviceProfileByDTO(dbClient interfaces.DBClient, dto dtos.UpdateDeviceProfi
 		return deviceProfile, errors.NewCommonEdgeX(errors.KindContractInvalid, fmt.Sprintf("device profile name '%s' not match the exsting '%s' ", *dto.Name, deviceProfile.Name), nil)
 	}
 	return deviceProfile, nil
+}
+
+func deviceProfileUoMValidation(p models.DeviceProfile, dic *di.Container) errors.EdgeX {
+	if container.ConfigurationFrom(dic.Get).Writable.UoM.Validation {
+		uom := container.UnitsOfMeasureFrom(dic.Get)
+		for _, dr := range p.DeviceResources {
+			if ok := uom.Validate(dr.Properties.Units); !ok {
+				return errors.NewCommonEdgeX(errors.KindContractInvalid, fmt.Sprintf("DeviceResource %s units %s is invalid", dr.Name, dr.Properties.Units), nil)
+			}
+		}
+	}
+
+	return nil
 }

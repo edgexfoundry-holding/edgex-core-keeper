@@ -1,58 +1,55 @@
 //
-// Copyright (C) 2021 IOTech Ltd
+// Copyright (C) 2021-2023 IOTech Ltd
+// Copyright (C) 2023 Intel Corporation
 //
 // SPDX-License-Identifier: Apache-2.0
 
 package data
 
 import (
-	"net/http"
-
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/container"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/di"
-	"github.com/gorilla/mux"
-
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/common"
+	"github.com/edgexfoundry/edgex-go"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/container"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/controller"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/handlers"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/di"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/common"
 
 	dataController "github.com/edgexfoundry/edgex-go/internal/core/data/controller/http"
-	commonController "github.com/edgexfoundry/edgex-go/internal/pkg/controller/http"
-	"github.com/edgexfoundry/edgex-go/internal/pkg/correlation"
+
+	"github.com/labstack/echo/v4"
 )
 
-func LoadRestRoutes(r *mux.Router, dic *di.Container, serviceName string) {
+func LoadRestRoutes(r *echo.Echo, dic *di.Container, serviceName string) {
+	lc := container.LoggingClientFrom(dic.Get)
+	secretProvider := container.SecretProviderExtFrom(dic.Get)
+	authenticationHook := handlers.AutoConfigAuthenticationFunc(secretProvider, lc)
+
 	// Common
-	cc := commonController.NewCommonController(dic, serviceName)
-	r.HandleFunc(common.ApiPingRoute, cc.Ping).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiVersionRoute, cc.Version).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiConfigRoute, cc.Config).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiMetricsRoute, cc.Metrics).Methods(http.MethodGet)
+	_ = controller.NewCommonController(dic, r, serviceName, edgex.Version)
 
 	// Events
 	ec := dataController.NewEventController(dic)
-	r.HandleFunc(common.ApiEventProfileNameDeviceNameSourceNameRoute, ec.AddEvent).Methods(http.MethodPost)
-	r.HandleFunc(common.ApiEventIdRoute, ec.EventById).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiEventIdRoute, ec.DeleteEventById).Methods(http.MethodDelete)
-	r.HandleFunc(common.ApiEventCountRoute, ec.EventTotalCount).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiEventCountByDeviceNameRoute, ec.EventCountByDeviceName).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiAllEventRoute, ec.AllEvents).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiEventByDeviceNameRoute, ec.EventsByDeviceName).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiEventByDeviceNameRoute, ec.DeleteEventsByDeviceName).Methods(http.MethodDelete)
-	r.HandleFunc(common.ApiEventByTimeRangeRoute, ec.EventsByTimeRange).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiEventByAgeRoute, ec.DeleteEventsByAge).Methods(http.MethodDelete)
+	r.POST(common.ApiEventServiceNameProfileNameDeviceNameSourceNameEchoRoute, ec.AddEvent, authenticationHook)
+	r.GET(common.ApiEventIdEchoRoute, ec.EventById, authenticationHook)
+	r.DELETE(common.ApiEventIdEchoRoute, ec.DeleteEventById, authenticationHook)
+	r.GET(common.ApiEventCountRoute, ec.EventTotalCount, authenticationHook)
+	r.GET(common.ApiEventCountByDeviceNameEchoRoute, ec.EventCountByDeviceName, authenticationHook)
+	r.GET(common.ApiAllEventRoute, ec.AllEvents, authenticationHook)
+	r.GET(common.ApiEventByDeviceNameEchoRoute, ec.EventsByDeviceName, authenticationHook)
+	r.DELETE(common.ApiEventByDeviceNameEchoRoute, ec.DeleteEventsByDeviceName, authenticationHook)
+	r.GET(common.ApiEventByTimeRangeEchoRoute, ec.EventsByTimeRange, authenticationHook)
+	r.DELETE(common.ApiEventByAgeEchoRoute, ec.DeleteEventsByAge, authenticationHook) // TODO: Add authentication to support-scheduler
 
 	// Readings
 	rc := dataController.NewReadingController(dic)
-	r.HandleFunc(common.ApiReadingCountRoute, rc.ReadingTotalCount).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiAllReadingRoute, rc.AllReadings).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiReadingByDeviceNameRoute, rc.ReadingsByDeviceName).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiReadingByTimeRangeRoute, rc.ReadingsByTimeRange).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiReadingByResourceNameRoute, rc.ReadingsByResourceName).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiReadingCountByDeviceNameRoute, rc.ReadingCountByDeviceName).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiReadingByResourceNameAndTimeRangeRoute, rc.ReadingsByResourceNameAndTimeRange).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiReadingByDeviceNameAndResourceNameRoute, rc.ReadingsByDeviceNameAndResourceName).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiReadingByDeviceNameAndResourceNameAndTimeRangeRoute, rc.ReadingsByDeviceNameAndResourceNameAndTimeRange).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiReadingByDeviceNameAndTimeRangeRoute, rc.ReadingsByDeviceNameAndResourceNamesAndTimeRange).Methods(http.MethodGet)
-
-	r.Use(correlation.ManageHeader)
-	r.Use(correlation.LoggingMiddleware(container.LoggingClientFrom(dic.Get)))
+	r.GET(common.ApiReadingCountRoute, rc.ReadingTotalCount, authenticationHook)
+	r.GET(common.ApiAllReadingRoute, rc.AllReadings, authenticationHook)
+	r.GET(common.ApiReadingByDeviceNameEchoRoute, rc.ReadingsByDeviceName, authenticationHook)
+	r.GET(common.ApiReadingByTimeRangeEchoRoute, rc.ReadingsByTimeRange, authenticationHook)
+	r.GET(common.ApiReadingByResourceNameEchoRoute, rc.ReadingsByResourceName, authenticationHook)
+	r.GET(common.ApiReadingCountByDeviceNameEchoRoute, rc.ReadingCountByDeviceName, authenticationHook)
+	r.GET(common.ApiReadingByResourceNameAndTimeRangeEchoRoute, rc.ReadingsByResourceNameAndTimeRange, authenticationHook)
+	r.GET(common.ApiReadingByDeviceNameAndResourceNameEchoRoute, rc.ReadingsByDeviceNameAndResourceName, authenticationHook)
+	r.GET(common.ApiReadingByDeviceNameAndResourceNameAndTimeRangeEchoRoute, rc.ReadingsByDeviceNameAndResourceNameAndTimeRange, authenticationHook)
+	r.GET(common.ApiReadingByDeviceNameAndTimeRangeEchoRoute, rc.ReadingsByDeviceNameAndResourceNamesAndTimeRange, authenticationHook)
 }

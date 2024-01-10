@@ -1,46 +1,44 @@
 // Copyright (C) 2021 IOTech Ltd
+// Copyright (C) 2023 Intel Corporation
 //
 // SPDX-License-Identifier: Apache-2.0
 
 package scheduler
 
 import (
-	"net/http"
+	"github.com/edgexfoundry/edgex-go"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/container"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/controller"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/handlers"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/di"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/common"
 
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/container"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/di"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/common"
-	"github.com/gorilla/mux"
-
-	commonController "github.com/edgexfoundry/edgex-go/internal/pkg/controller/http"
-	"github.com/edgexfoundry/edgex-go/internal/pkg/correlation"
 	schedulerController "github.com/edgexfoundry/edgex-go/internal/support/scheduler/controller/http"
+
+	"github.com/labstack/echo/v4"
 )
 
-func LoadRestRoutes(r *mux.Router, dic *di.Container, serviceName string) {
+func LoadRestRoutes(r *echo.Echo, dic *di.Container, serviceName string) {
+	lc := container.LoggingClientFrom(dic.Get)
+	secretProvider := container.SecretProviderExtFrom(dic.Get)
+	authenticationHook := handlers.AutoConfigAuthenticationFunc(secretProvider, lc)
+
 	// Common
-	cc := commonController.NewCommonController(dic, serviceName)
-	r.HandleFunc(common.ApiPingRoute, cc.Ping).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiVersionRoute, cc.Version).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiConfigRoute, cc.Config).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiMetricsRoute, cc.Metrics).Methods(http.MethodGet)
+	_ = controller.NewCommonController(dic, r, serviceName, edgex.Version)
 
 	// Interval
 	interval := schedulerController.NewIntervalController(dic)
-	r.HandleFunc(common.ApiIntervalRoute, interval.AddInterval).Methods(http.MethodPost)
-	r.HandleFunc(common.ApiIntervalByNameRoute, interval.IntervalByName).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiAllIntervalRoute, interval.AllIntervals).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiIntervalByNameRoute, interval.DeleteIntervalByName).Methods(http.MethodDelete)
-	r.HandleFunc(common.ApiIntervalRoute, interval.PatchInterval).Methods(http.MethodPatch)
+	r.POST(common.ApiIntervalRoute, interval.AddInterval, authenticationHook)
+	r.GET(common.ApiIntervalByNameEchoRoute, interval.IntervalByName, authenticationHook)
+	r.GET(common.ApiAllIntervalRoute, interval.AllIntervals, authenticationHook)
+	r.DELETE(common.ApiIntervalByNameEchoRoute, interval.DeleteIntervalByName, authenticationHook)
+	r.PATCH(common.ApiIntervalRoute, interval.PatchInterval, authenticationHook)
 
 	// IntervalAction
 	action := schedulerController.NewIntervalActionController(dic)
-	r.HandleFunc(common.ApiIntervalActionRoute, action.AddIntervalAction).Methods(http.MethodPost)
-	r.HandleFunc(common.ApiAllIntervalActionRoute, action.AllIntervalActions).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiIntervalActionByNameRoute, action.IntervalActionByName).Methods(http.MethodGet)
-	r.HandleFunc(common.ApiIntervalActionByNameRoute, action.DeleteIntervalActionByName).Methods(http.MethodDelete)
-	r.HandleFunc(common.ApiIntervalActionRoute, action.PatchIntervalAction).Methods(http.MethodPatch)
-
-	r.Use(correlation.ManageHeader)
-	r.Use(correlation.LoggingMiddleware(container.LoggingClientFrom(dic.Get)))
+	r.POST(common.ApiIntervalActionRoute, action.AddIntervalAction, authenticationHook)
+	r.GET(common.ApiAllIntervalActionRoute, action.AllIntervalActions, authenticationHook)
+	r.GET(common.ApiIntervalActionByNameEchoRoute, action.IntervalActionByName, authenticationHook)
+	r.DELETE(common.ApiIntervalActionByNameEchoRoute, action.DeleteIntervalActionByName, authenticationHook)
+	r.PATCH(common.ApiIntervalActionRoute, action.PatchIntervalAction, authenticationHook)
 }

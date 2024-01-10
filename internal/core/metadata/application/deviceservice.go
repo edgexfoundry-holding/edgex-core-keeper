@@ -8,18 +8,17 @@ package application
 import (
 	"context"
 	"fmt"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/common"
 
 	"github.com/edgexfoundry/edgex-go/internal/core/metadata/container"
 	"github.com/edgexfoundry/edgex-go/internal/core/metadata/infrastructure/interfaces"
 	"github.com/edgexfoundry/edgex-go/internal/pkg/correlation"
-	"github.com/edgexfoundry/edgex-go/internal/pkg/utils"
-
-	bootstrapContainer "github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/container"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/di"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/dtos"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/dtos/requests"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/errors"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/models"
+	bootstrapContainer "github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/container"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/di"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/dtos"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/dtos/requests"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/errors"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/models"
 )
 
 // The AddDeviceService function accepts the new device service model from the controller function
@@ -39,7 +38,8 @@ func AddDeviceService(d models.DeviceService, ctx context.Context, dic *di.Conta
 		addedDeviceService.Id,
 		correlationId,
 	)
-
+	DeviceServiceDTO := dtos.FromDeviceServiceModelToDTO(d)
+	go publishSystemEvent(common.DeviceServiceSystemEventType, common.SystemEventActionAdd, d.Name, DeviceServiceDTO, ctx, dic)
 	return addedDeviceService.Id, nil
 }
 
@@ -78,11 +78,8 @@ func PatchDeviceService(dto dtos.UpdateDeviceService, ctx context.Context, dic *
 		"DeviceService patched on DB successfully. Correlation-ID: %s ",
 		correlation.FromContext(ctx),
 	)
-	// Don't invoke callback if only lastConnected field is updated
-	if dto.LastConnected != nil && utils.OnlyOneFieldUpdated("LastConnected", dto) {
-		return nil
-	}
-	go updateDeviceServiceCallback(ctx, dic, deviceService)
+	DeviceServiceDTO := dtos.FromDeviceServiceModelToDTO(deviceService)
+	go publishSystemEvent(common.DeviceServiceSystemEventType, common.SystemEventActionUpdate, deviceService.Name, DeviceServiceDTO, ctx, dic)
 	return nil
 }
 
@@ -111,27 +108,16 @@ func DeleteDeviceServiceByName(name string, ctx context.Context, dic *di.Contain
 		return errors.NewCommonEdgeX(errors.KindContractInvalid, "name is empty", nil)
 	}
 	dbClient := container.DBClientFrom(dic.Get)
-
-	// Check the associated Device and ProvisionWatcher existence
-	devices, err := dbClient.DevicesByServiceName(0, 1, name)
+	deviceService, err := dbClient.DeviceServiceByName(name)
 	if err != nil {
 		return errors.NewCommonEdgeXWrapper(err)
 	}
-	if len(devices) > 0 {
-		return errors.NewCommonEdgeX(errors.KindStatusConflict, "fail to delete the device service when associated device exists", nil)
-	}
-	provisionWatchers, err := dbClient.ProvisionWatchersByServiceName(0, 1, name)
-	if err != nil {
-		return errors.NewCommonEdgeXWrapper(err)
-	}
-	if len(provisionWatchers) > 0 {
-		return errors.NewCommonEdgeX(errors.KindStatusConflict, "fail to delete the device service when associated provisionWatcher exists", nil)
-	}
-
 	err = dbClient.DeleteDeviceServiceByName(name)
 	if err != nil {
 		return errors.NewCommonEdgeXWrapper(err)
 	}
+	DeviceServiceDTO := dtos.FromDeviceServiceModelToDTO(deviceService)
+	go publishSystemEvent(common.DeviceServiceSystemEventType, common.SystemEventActionDelete, deviceService.Name, DeviceServiceDTO, ctx, dic)
 	return nil
 }
 

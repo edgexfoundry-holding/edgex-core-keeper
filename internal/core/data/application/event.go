@@ -10,14 +10,14 @@ import (
 	"fmt"
 	"strings"
 
-	msgTypes "github.com/edgexfoundry/go-mod-messaging/v2/pkg/types"
+	msgTypes "github.com/edgexfoundry/go-mod-messaging/v3/pkg/types"
 
-	bootstrapContainer "github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/container"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/di"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/common"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/dtos"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/errors"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/models"
+	bootstrapContainer "github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/container"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/di"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/common"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/dtos"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/errors"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/models"
 
 	"github.com/edgexfoundry/edgex-go/internal/core/data/container"
 	"github.com/edgexfoundry/edgex-go/internal/pkg/correlation"
@@ -25,9 +25,11 @@ import (
 	"github.com/google/uuid"
 )
 
+const CoreDataEventTopicPrefix = "core"
+
 // ValidateEvent validates if e is a valid event with corresponding device profile name and device name and source name
 // ValidateEvent throws error when profileName or deviceName doesn't match to e
-func (a *CoreDataApp) ValidateEvent(e models.Event, profileName string, deviceName string, sourceName string, ctx context.Context, dic *di.Container) errors.EdgeX {
+func (a *CoreDataApp) ValidateEvent(e models.Event, profileName string, deviceName string, sourceName string, _ context.Context, _ *di.Container) errors.EdgeX {
 	if e.ProfileName != profileName {
 		return errors.NewCommonEdgeX(errors.KindContractInvalid, fmt.Sprintf("event's profileName %s mismatches %s", e.ProfileName, profileName), nil)
 	}
@@ -73,22 +75,24 @@ func (a *CoreDataApp) AddEvent(e models.Event, ctx context.Context, dic *di.Cont
 }
 
 // PublishEvent publishes incoming AddEventRequest in the format of []byte through MessageClient
-func (a *CoreDataApp) PublishEvent(data []byte, profileName string, deviceName string, sourceName string, ctx context.Context, dic *di.Container) {
+func (a *CoreDataApp) PublishEvent(data []byte, serviceName string, profileName string, deviceName string, sourceName string, ctx context.Context, dic *di.Container) {
 	lc := bootstrapContainer.LoggingClientFrom(dic.Get)
 	msgClient := bootstrapContainer.MessagingClientFrom(dic.Get)
 	configuration := container.ConfigurationFrom(dic.Get)
 	correlationId := correlation.FromContext(ctx)
 
-	publishTopic := fmt.Sprintf("%s/%s/%s/%s", configuration.MessageQueue.PublishTopicPrefix, profileName, deviceName, sourceName)
-	lc.Debugf("Publishing V2 AddEventRequest to message queue. Topic: %s; %s: %s", publishTopic, common.CorrelationHeader, correlationId)
+	basePrefix := configuration.MessageBus.GetBaseTopicPrefix()
+	publishTopic := common.NewPathBuilder().EnableNameFieldEscape(configuration.Service.EnableNameFieldEscape).
+		SetPath(basePrefix).SetPath(common.EventsPublishTopic).SetPath(CoreDataEventTopicPrefix).SetNameFieldPath(serviceName).SetNameFieldPath(profileName).SetNameFieldPath(deviceName).SetNameFieldPath(sourceName).BuildPath()
+	lc.Debugf("Publishing AddEventRequest to MessageBus. Topic: %s; %s: %s", publishTopic, common.CorrelationHeader, correlationId)
 
 	msgEnvelope := msgTypes.NewMessageEnvelope(data, ctx)
 	err := msgClient.Publish(msgEnvelope, publishTopic)
 	if err != nil {
-		lc.Errorf("Unable to send message for V2 API event. Correlation-id: %s, Profile Name: %s, "+
+		lc.Errorf("Unable to send message for API event. Correlation-id: %s, Profile Name: %s, "+
 			"Device Name: %s, Source Name: %s, Error: %v", correlationId, profileName, deviceName, sourceName, err)
 	} else {
-		lc.Debugf("V2 API Event Published on message queue. Topic: %s, Correlation-id: %s ", publishTopic, correlationId)
+		lc.Debugf("Event Published to MessageBus. Topic: %s, Correlation-id: %s ", publishTopic, correlationId)
 	}
 }
 
@@ -135,7 +139,7 @@ func (a *CoreDataApp) DeleteEventById(id string, dic *di.Container) errors.EdgeX
 	return nil
 }
 
-// EventTotalCount return the count of all of events currently stored in the database and error if any
+// EventTotalCount return the count of all events currently stored in the database and error if any
 func (a *CoreDataApp) EventTotalCount(dic *di.Container) (uint32, errors.EdgeX) {
 	dbClient := container.DBClientFrom(dic.Get)
 
@@ -147,7 +151,7 @@ func (a *CoreDataApp) EventTotalCount(dic *di.Container) (uint32, errors.EdgeX) 
 	return count, nil
 }
 
-// EventCountByDeviceName return the count of all of events associated with given device and error if any
+// EventCountByDeviceName return the count of all events associated with given device and error if any
 func (a *CoreDataApp) EventCountByDeviceName(deviceName string, dic *di.Container) (uint32, errors.EdgeX) {
 	dbClient := container.DBClientFrom(dic.Get)
 
@@ -167,11 +171,14 @@ func (a *CoreDataApp) DeleteEventsByDeviceName(deviceName string, dic *di.Contai
 		return errors.NewCommonEdgeX(errors.KindInvalidId, "blank device name is not allowed", nil)
 	}
 	dbClient := container.DBClientFrom(dic.Get)
+	lc := bootstrapContainer.LoggingClientFrom(dic.Get)
 
-	err := dbClient.DeleteEventsByDeviceName(deviceName)
-	if err != nil {
-		return errors.NewCommonEdgeXWrapper(err)
-	}
+	go func() {
+		err := dbClient.DeleteEventsByDeviceName(deviceName)
+		if err != nil {
+			lc.Errorf("Delete events by device name failed: %v", err)
+		}
+	}()
 	return nil
 }
 
@@ -234,10 +241,13 @@ func (a *CoreDataApp) EventsByTimeRange(startTime int, endTime int, offset int, 
 // events that are older than age.  Age is supposed in milliseconds since created timestamp.
 func (a *CoreDataApp) DeleteEventsByAge(age int64, dic *di.Container) errors.EdgeX {
 	dbClient := container.DBClientFrom(dic.Get)
+	lc := bootstrapContainer.LoggingClientFrom(dic.Get)
 
-	err := dbClient.DeleteEventsByAge(age)
-	if err != nil {
-		return errors.NewCommonEdgeXWrapper(err)
-	}
+	go func() {
+		err := dbClient.DeleteEventsByAge(age)
+		if err != nil {
+			lc.Errorf("Delete events by age failed: %v", err)
+		}
+	}()
 	return nil
 }

@@ -15,13 +15,12 @@ import (
 	"github.com/edgexfoundry/edgex-go/internal/pkg/infrastructure/redis"
 	"github.com/edgexfoundry/edgex-go/internal/pkg/interfaces"
 
-	bootstrapContainer "github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/container"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/secret"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/startup"
-	bootstrapConfig "github.com/edgexfoundry/go-mod-bootstrap/v2/config"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/di"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/clients/logger"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/common"
+	bootstrapContainer "github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/container"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/secret"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/startup"
+	bootstrapConfig "github.com/edgexfoundry/go-mod-bootstrap/v3/config"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/di"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/clients/logger"
 )
 
 // httpServer defines the contract used to determine whether or not the http httpServer is running.
@@ -49,7 +48,7 @@ func NewDatabase(httpServer httpServer, database bootstrapInterfaces.Database, d
 func (d Database) newDBClient(
 	lc logger.LoggingClient,
 	credentials bootstrapConfig.Credentials) (interfaces.DBClient, error) {
-	databaseInfo := d.database.GetDatabaseInfo()[common.Primary]
+	databaseInfo := d.database.GetDatabaseInfo()
 	switch databaseInfo.Type {
 	case "redisdb":
 		return redis.NewClient(
@@ -57,6 +56,7 @@ func (d Database) newDBClient(
 				Host:     databaseInfo.Host,
 				Port:     databaseInfo.Port,
 				Password: credentials.Password,
+				Timeout:  databaseInfo.Timeout,
 			},
 			lc)
 	default:
@@ -74,23 +74,38 @@ func (d Database) BootstrapHandler(
 	lc := bootstrapContainer.LoggingClientFrom(dic.Get)
 	secretProvider := bootstrapContainer.SecretProviderFrom(dic.Get)
 
-	// get database credentials.
+	dbInfo := d.database.GetDatabaseInfo()
+	if len(dbInfo.Host) == 0 || dbInfo.Port == 0 || len(dbInfo.Type) == 0 || len(dbInfo.Timeout) == 0 {
+		lc.Error("Database configuration is empty or incomplete, missing common config? Use -cp or -cc flags for common config")
+		return false
+	}
+
 	var credentials bootstrapConfig.Credentials
+	dbCredsRetrieved := false
 	for startupTimer.HasNotElapsed() {
 		var err error
 
-		secrets, err := secretProvider.GetSecret(d.database.GetDatabaseInfo()[common.Primary].Type)
+		secrets, err := secretProvider.GetSecret(d.database.GetDatabaseInfo().Type)
 		if err == nil {
 			credentials = bootstrapConfig.Credentials{
 				Username: secrets[secret.UsernameKey],
 				Password: secrets[secret.PasswordKey],
 			}
 
+			dbCredsRetrieved = true
 			break
 		}
 
-		lc.Warnf("couldn't retrieve database credentials: %v", err.Error())
+		lc.Warnf("couldn't retrieve database credentials: %v and will retry it again, %s", err.Error(),
+			"missing common config? Use -cp or -cc flags for common config")
 		startupTimer.SleepForInterval()
+	}
+
+	// using this check to avoid the confusion with the case of both Username and Password being set to empty from credentials
+	if !dbCredsRetrieved {
+		// shouldn't go further if database credentials failed to retrieve
+		lc.Error("bootstrap failed: couldn't retrieve database credentials after some retries, missing common config? Use -cp or -cc flags for common config")
+		return false
 	}
 
 	// initialize database.
@@ -117,7 +132,7 @@ func (d Database) BootstrapHandler(
 		},
 	})
 
-	lc.Info("Database for V2 API connected")
+	lc.Info("Database connected")
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -131,7 +146,7 @@ func (d Database) BootstrapHandler(
 			}
 			time.Sleep(time.Second)
 		}
-		lc.Info("Database for V2 API disconnected")
+		lc.Info("Database disconnected")
 	}()
 
 	return true

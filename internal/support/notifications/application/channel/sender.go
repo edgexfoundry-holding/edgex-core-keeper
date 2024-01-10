@@ -9,11 +9,11 @@ import (
 	"github.com/edgexfoundry/edgex-go/internal/pkg/utils"
 	notificationContainer "github.com/edgexfoundry/edgex-go/internal/support/notifications/container"
 
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/container"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/di"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/container"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/di"
 
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/errors"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/models"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/errors"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/models"
 )
 
 // Sender abstracts the notification sending via specified channel
@@ -39,7 +39,9 @@ func (sender *RESTSender) Send(notification models.Notification, address models.
 	if !ok {
 		return "", errors.NewCommonEdgeX(errors.KindContractInvalid, "fail to cast Address to RESTAddress", nil)
 	}
-	return utils.SendRequestWithRESTAddress(lc, notification.Content, notification.ContentType, restAddress)
+	// NOTE: Not currently passing an AuthenticationInjector here;
+	// no current notifications are calling EdgeX services
+	return utils.SendRequestWithRESTAddress(lc, notification.Content, notification.ContentType, restAddress, nil)
 }
 
 // EmailSender is the implementation of the interfaces.ChannelSender, which is used to send the notifications via email

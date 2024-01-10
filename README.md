@@ -1,59 +1,104 @@
-# EdgeX Keeper
+# EdgeX Foundry Services
+[![Build Status](https://jenkins.edgexfoundry.org/view/EdgeX%20Foundry%20Project/job/edgexfoundry/job/edgex-go/job/main/badge/icon)](https://jenkins.edgexfoundry.org/view/EdgeX%20Foundry%20Project/job/edgexfoundry/job/edgex-go/job/main/) [![Code Coverage](https://codecov.io/gh/edgexfoundry/edgex-go/branch/main/graph/badge.svg?token=Y3mpessZqk)](https://codecov.io/gh/edgexfoundry/edgex-go) [![Go Report Card](https://goreportcard.com/badge/github.com/edgexfoundry/edgex-go)](https://goreportcard.com/report/github.com/edgexfoundry/edgex-go) [![GitHub Latest Dev Tag)](https://img.shields.io/github/v/tag/edgexfoundry/edgex-go?include_prereleases&sort=semver&label=latest-dev)](https://github.com/edgexfoundry/edgex-go/tags) ![GitHub Latest Stable Tag)](https://img.shields.io/github/v/tag/edgexfoundry/edgex-go?sort=semver&label=latest-stable) [![GitHub License](https://img.shields.io/github/license/edgexfoundry/edgex-go)](https://choosealicense.com/licenses/apache-2.0/) ![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/edgexfoundry/edgex-go) [![GitHub Pull Requests](https://img.shields.io/github/issues-pr-raw/edgexfoundry/edgex-go)](https://github.com/edgexfoundry/edgex-go/pulls) [![GitHub Contributors](https://img.shields.io/github/contributors/edgexfoundry/edgex-go)](https://github.com/edgexfoundry/edgex-go/contributors) [![GitHub Committers](https://img.shields.io/badge/team-committers-green)](https://github.com/orgs/edgexfoundry/teams/edgex-go-committers/members) [![GitHub Commit Activity](https://img.shields.io/github/commit-activity/m/edgexfoundry/edgex-go)](https://github.com/edgexfoundry/edgex-go/commits)
 
-EdgeX Keeper is a lightweight configuration and registry service that is aimed to replace Consul in the EdgeX architecture.
-It uses Redis from the existing EdgeX service architecture as the data persistent store, and implements the configuration and registry abstractions by adopting the `go-mod-configuration`
-and `go-mod-registry` modules from EdgeX.
+> **Warning**  
+> The **main** branch of this repository contains work-in-progress development code for the upcoming release, and is **not guaranteed to be stable or working**.
+> It is only compatible with the [main branch of edgex-compose](https://github.com/edgexfoundry/edgex-compose) which uses the Docker images built from the **main** branch of this repo and other repos.
+>
+> **The source for the latest release can be found at [Releases](https://github.com/edgexfoundry/edgex-go/releases).**
 
-The code base of `edgex-core-keeper` is a clone of the [edgexfoundry/edgex-go](https://github.com/edgexfoundry/edgex-go) repository, and with the new `core-keeper` source code added. This provides an easier way to integrate the new code back into `edgexfoundry/edgex-go` in the future. 
+EdgeX Foundry is a vendor-neutral open source project hosted by The Linux Foundation building a common open framework for IoT edge computing.  At the heart of the project is an interoperability framework hosted within a full hardware- and OS-agnostic reference software platform to enable an ecosystem of plug-and-play components that unifies the marketplace and accelerates the deployment of IoT solutions.  This repository contains the Go implementation of EdgeX Foundry microservices.  It also includes files for building the services, containerizing the services, and initializing (bootstrapping) the services.
 
->See EdgeX [Configuration and Registry Providers](https://docs.edgexfoundry.org/2.2/microservices/configuration/ConfigurationAndRegistry/) documentation for more details about the roles they play in the EdgeX architecture.
+## Build with NATS Messaging
+Currently, the NATS Messaging capability (NATS MessageBus) is opt-in at build time. This means that the published Docker images do not include the NATS messaging capability.
 
-## High level architecture design
-EdgeX Keeper acts as the Configuration and Registry Providers by using the **Config Handler** and **Registry Handler** modules to communicate with other EdgeX services.
-Each EdgeX service will bootstrap its configuration and registry information into Keeper when started, listens for any **Writable** configuration change events via the message bus, and runs health checks to other services.
+The following make commands will build the local binaries or local Docker images with NATS messaging capability included for the Core and Support services.
 
-In addition, users can manage the configuration and registry information by calling the REST APIs provided by EdgeX Keeper.
+```makefile
+make build-nats
+make docker-nats
+```
 
-The following architecture diagram demonstrates how Keeper works to function as configuration/registry providers for other services and communicate with external users.
+The locally built Docker images can then be used in place of the published Docker images in your compose file.
+See [Compose Builder](https://github.com/edgexfoundry/edgex-compose/tree/main/compose-builder#gen) `nat-bus` option to generate compose file for NATS and local dev images.
 
-![keeper_architecture_diagram](images/keeper_architecture.png?raw=true "keeper_architecture")
+## Get Started
 
-## Installation and deployment options
-### Generate a binary executable and run
+EdgeX provides docker images in our organization's [DockerHub page](https://hub.docker.com/u/edgexfoundry/).
+They can be launched easily with **docker-compose**.
+
+The simplest way to get started is to fetch the latest docker-compose.yml and start the EdgeX containers:
+
+```sh
+release="main" # or "jakarta" for latest
+wget https://raw.githubusercontent.com/edgexfoundry/edgex-compose/${release}/docker-compose.yml
+docker-compose up -d
+```
+
+You can check the status of your running EdgeX services by going to http://localhost:8500/
+
+Now that you have EdgeX up and running, you can follow our [API Walkthrough](https://docs.edgexfoundry.org/2.1/walk-through/Ch-Walkthrough/) to learn how the different services work together to connect IoT devices to cloud services.
+
+## Running EdgeX with security components
+
+Starting with the Fuji release, EdgeX includes enhanced security features that are enabled by default. There are a few major components that are responsible for security
+features: 
+
+- Security-secretstore-setup
+- Security-proxy-setup
+
+As part of Ireland release, the `security-secrets-setup` service is no more as internal service-to-service communication will not run in TLS by default in a single box.
+
+When security features are enabled, additional steps are required to access the resources of EdgeX.
+
+1. The user needs to create an access token and associate every REST request with the access token. 
+2. The exported external ports (such as 59880, 59881 etc.) will be inaccessible for security purposes. Instead, all REST requests need to go through the proxy. The proxy will redirect the request to the individual microservices on behalf of the user.
+
+Sample steps to create an access token and use the token to access EdgeX resources can be found here: [Security Components](SECURITY.md)
+
+## Other installation and deployment options
+
+### Native binaries
+
 #### Prerequisites
+
 ##### Go
-- The current targeted version of the Go language runtime for release artifacts is v1.17.x
-- The minimum supported version of the Go language runtime is v1.17.x
 
-##### Clone the edgex-core-keeper source code
-Clone the source code and switch to the working directory.
-```sh
-git clone git@github.com:IOTechSystems/edgex-core-keeper.git
-cd edgex-core-keeper
-````
+- The current targeted version of the Go language runtime for release artifacts is v1.18.x
+- The minimum supported version of the Go language runtime is v1.18.x
 
-##### Redis
-EdgeX Keeper is used Redis DB as the persistence layer. Please start the Redis server before running the EdgeX Keeper application.
-###### Update the config file for Redis connection
-In the `cmd/core-keeper/res/configuration.toml` file, enter the Redis connection detail in the following section.
+#### Installation and Execution
+
+EdgeX is organized as Go Modules; there is no requirement to set the GOPATH or
+GO111MODULE envrionment variables nor is there a requirement to root all the components under ~/go
+(or $GOPATH) and use the `go get` command. In other words,
+
 ```sh
-[Databases]
-  [Databases.Primary]
-  Host = "edgex-redis" # Update the Redis db host for edgex-core-keeper to store data
-  Name = "corekeeper"
-  Port = 6379
-  Timeout = 5000
-  Type = "redisdb"
+git clone git@github.com:edgexfoundry/edgex-go.git
+cd edgex-go
+make build
 ```
 
-#### Build and run the binary executable
-Follow the "Clone the edgex-core-keeper source code" and "Redis" steps above to clone the source and set up the Redis server that is used for connection.
+If you do want to root everything under $GOPATH, you're free to use that pattern as well
+
 ```sh
-make run
+GO111MODULE=on && export GO111MODULE
+go get github.com/edgexfoundry/edgex-go
+cd $GOPATH/src/github.com/edgexfoundry/edgex-go
+make build
 ```
 
+#### Deploy EdgeX
 
-### Build your own Docker Container
+Recommended deployment of EdgeX services is with Docker. See [Getting Started with Docker](https://docs.edgexfoundry.org/2.0/getting-started/Ch-GettingStartedUsers/) for more details. 
+
+#### Hybrid for debug/testing
+
+If you need to run and/or debug one of the services locally, simply stop the docker container running that service and run the service locally from command-line or from your debugger. All executables are located in the `cmd/<service-name>` folders. See [Working in a Hybrid Environment](https://docs.edgexfoundry.org/2.0/getting-started/Ch-GettingStartedHybrid/) for more details.
+
+> *Note that this works best when running the service in non-secure mode. i.e. with environment variable `EDGEX_SECURITY_SECRET_STORE=false`*
+
+### Build your own Docker Containers
 
 In addition to running the services directly, Docker and Docker Compose can be used.
 
@@ -62,239 +107,51 @@ In addition to running the services directly, Docker and Docker Compose can be u
 See [the install instructions](https://docs.docker.com/install/) to learn how to obtain and install Docker.
 
 #### Build
-Follow the "Build and run the binary executable" steps above for obtaining the code, then build the dockcer image:
+
+Follow the "Installation and Execution" steps above for obtaining and building the code, then
+
 ```sh
 make docker 
 ```
 
-#### Run the core-keeper image as a container
+#### Delayed Start Go Builds For Developers
 
-##### Use the docker container file in this repository to start the `edgex-core-keeper` and `edgex-redis` container
-```sh
-docker-compose up -d
+Currently for EdgeX core services except support services (support-notification and support-scheduler services), the delayed start feature from the dependency go-mod-bootstrap / go-mod-secrets modules are excluded in go builds by default.
+If you want to **include** the delayed start feature in the builds for these services, please change the [Makefile in this directory](Makefile). In particular, change the following boolean flag from `false` to `true` before the whole docker builds.
+
+```text
+INCLUDE_DELAYED_START_BUILD_CORE:="false"
 ```
 
-## EdgeX Keeper API examples
-After the EdgeX Keeper service is started, the `Get key` and `Create/Update key` endpoints can be invoked with the following examples.
-### Create/Update key
-There's a query parameter `flatten` defined in the Create/Update key API, and it controls the way to store the json object in the `value` field. The default value of `flatten` is `false`.
-#### `flatten` is `true`
-Enter the following command to create a series of keys starting with the prefix `core/data`, and the json object defined in the `value` field should be flattened before storing into database.
-- Request sample
-```shell
-curl --location --request PUT 'localhost:59883/api/v2/kvs/key/core/data?flatten=true' \
---header 'Content-Type: application/json' \
---data-raw '{
-  "value":{
-    "MaxEventSize":25000,
-    "Writable":{
-      "PersistData":true,
-      "LogLevel":"INFO",
-      "InsecureSecrets":{
-        "DB":{
-          "path":"redisdb"
-        }
-      }
-    }
-  }
-}'
-```
-- Response sample
+For support services, the delayed start feature is included by default. Similarly, you can change the default and **exclude** it by modifying the boolean flag from `true` to `false` in the Makefile:
 
-The following individual keys were created with prefix `core/data` from the url path, and property name as key(ex. `MaxEventSize`) from the `value` json object in the request payload.
-```shell
-{
-    "apiVersion": "v2",
-    "statusCode": 200,
-    "response": [
-        "core/data/MaxEventSize",
-        "core/data/Writable/PersistData",
-        "core/data/Writable/LogLevel",
-        "core/data/Writable/InsecureSecrets/DB/path"
-    ]
-}
-```
-#### `flatten` is `false`
-Enter the following command to create a single key `core/data`, and the json object defined in the `value` field should be stored as a string.
-- Request sample
-```shell
-curl --location --request PUT 'localhost:59883/api/v2/kvs/key/core/data?flatten=false' \
---header 'Content-Type: application/json' \
---data-raw '{
-  "value":{
-    "MaxEventSize":25000,
-    "Writable":{
-      "PersistData":true,
-      "LogLevel":"INFO",
-      "InsecureSecrets":{
-        "DB":{
-          "path":"redisdb"
-        }
-      }
-    }
-  }
-}'
-```
-- Response sample
-
-Only one key `core/data` has been created from the url path definition, and the json object defined in the `value` field is stored as a string.
-```shell
-{
-    "apiVersion": "v2",
-    "statusCode": 200,
-    "response": [
-        "core/data"
-    ]
-}
+```text
+INCLUDE_DELAYED_START_BUILD_SUPPORT:="true"
 ```
 
-### Get key
-#### Request example
-Run the following command to get all the stored values of keys starting with the prefix `core/data`.
-```shell
-curl --location --request GET 'localhost:59883/api/v2/kvs/key/core/data'
-```
-#### Response example
-```shell
-{
-    "apiVersion": "v2",
-    "statusCode": 200,
-    "response": [
-        {
-            "key": "core/data/MaxEventSize",
-            "created": 1655372656274362,
-            "modified": 1655372656274362,
-            "value": 25000
-        },
-        {
-            "key": "core/data/Writable/LogLevel",
-            "created": 1655372656268428,
-            "modified": 1655372656268428,
-            "value": "SU5GTw=="
-        },
-        {
-            "key": "core/data/Writable/InsecureSecrets/DB/path",
-            "created": 1655372656269610,
-            "modified": 1655372656269610,
-            "value": "cmVkaXNkYg=="
-        },
-       ...
-    ]
-}
+#### Run 
+
+The **Compose Builder** tool has the `dev` option to generate and run EdgeX compose files using locally built images for above. See [Compose Builder README](https://github.com/edgexfoundry/edgex-compose/tree/main/compose-builder#readme) for more details.
+
+```bash
+make run no-secty dev
 ```
 
-> #### Change summary to the key-value APIs:
-> 
-> - Update url path name from `/kv/{key}` to `/kvs/key/{key}`
-> - Rename the GET API query parameters:
->   - `key` to `keyOnly`
->   - `raw` to `plaintext`
-> - Rename the DELETE API query parameter:
->  - `recurse` to `prefixMatch`
+> *Note that this run all the edgex-go services using the locally built images.*
 
-## Use EdgeX Keeper as Configuration Provider
-EdgeX Keeper uses the message bus from EdgeX go-mod-messaging module to publish the configuration change event. 
-In order to update the `Writable` configuration settings for a service without restarting, EdgeX Keeper and other services need to connect to the same message bus.
+#### Community
 
-Every time when a configuration value gets created or updated, Keeper will publish a key change event via the message bus; the other service which subscribes to the particular topic will get the updated configuration value.
+- Discussion: https://github.com/orgs/edgexfoundry/discussions
+- Mailing lists: https://lists.edgexfoundry.org/mailman/listinfo
 
-The following diagram shows how the **Watch** feature is implemented on EdgeX Keeper.
+## License
 
-![watch_diagram](images/watch.png?raw=true "watch")
+[Apache-2.0](LICENSE)
 
-### Steps for setting Keeper as Configuration Provider
-Please see the following steps for EdgeX Core Data service to use EdgeX Keeper as Configuration Provider.
+## Versioning
 
-#### Update the`MessageQueue` of both EdgeX Keeper (Publisher) and Core Data (Subscriber)
-As previously mentioned, EdgeX Keeper will publish the key change event whenever the configuration value is updated. In order for Core Data to
-get notified when the `Writable` configuration setting is changed, EdgeX Keeper and Core Data need to connect to the same message bus.
-Therefore, both EdgeX Keeper and Core Data have to connect to the same message bus, and the `MessageQueue` section in the configuration.toml of each should match up.
+Please refer to the EdgeX Foundry [versioning policy](https://wiki.edgexfoundry.org/pages/viewpage.action?pageId=21823969) for information on how EdgeX services are released and how EdgeX services are compatible with one another.  Specifically, device services (and the associated SDK), application services (and the associated app functions SDK), and client tools (like the EdgeX CLI and UI) can have independent minor releases, but these services must be compatible with the latest major release of EdgeX.
 
-Here we use the default `MessageQueue` type `redis` as example (MQTT message bus type is supported as well).
-See the following example defined in the configuration.toml:
-```shell
-[MessageQueue]
-Protocol = "redis"
-Host = "localhost"
-Port = 6379
-Type = "redis"
-```
+## Long Term Support
 
-> The `MessageQueue` configuration setting is only defined in the configuration.toml of Core Data in the Kamakura release.
->
-> For other EdgeX services, the `MessageQueue` section needs to be added for adopting the [go-mod-messaging](https://github.com/edgexfoundry/go-mod-messaging) module to subscribe to the message bus.
-> 
-> In the future EdgeX release, the message bus implementation will be applied to every EdgeX service to publish service metrics.
-> Therefore, no additional tweak needed for each EdgeX service to use EdgeX Keeper as the configuration provider.
-
-
-
-#### Replace go-mod-configuration module in edgex-go
-Skip this step if using the source code to build Core Data in this repository directly.
-
-If you would like to use the edgex-go source code to build Core Data from other repository,
-add the following line in the end of [edgex-go/go.mod](https://github.com/edgexfoundry/edgex-go/blob/main/go.mod) file to replace `go-mod-configuration` module in to the one under [IOTechSystems](https://github.com/IOTechSystems/go-mod-configuration) which implements Keeper as the configuration provider option.
-```shell
-replace github.com/edgexfoundry/go-mod-configuration/v2 => github.com/IOTechSystems/go-mod-configuration/v2 core-keeper
-```
-
-#### Start EdgeX Keeper and Core Data
-- Start EdgeX Keeper as mentioned in [Build and run the binary executable](https://github.com/IOTechSystems/edgex-core-keeper#build-and-run-the-binary-executable). 
-- Start Core Data with the following command
-    ```shell
-    ./core-data -cp=keeper.http://localhost:59883
-    ```
-    or use the [Makefile](https://github.com/IOTechSystems/edgex-core-keeper/blob/main/Makefile) in this repository
-    ```shell
-    make run_core_data
-    ```
-    to build and run the binary executable of Core Data to use Keeper as configuration provider.
-#### Invoke the EdgeX Keeper Update Key API to change the Writable setting
-```shell
-curl --location --request PUT 'localhost:59883/api/v2/kv/edgex/core/2.0/core-data/Writable/LogLevel' \
---header 'Content-Type: application/json' \
---data-raw '{
-  "value": "DEBUG"
-}'
-```
-
-#### Invoke the Core Data config API and verify the configuration has been updated without a restart
-```shell
-curl --location --request GET 'localhost:59880/api/v2/config'
-```
-
-## Use EdgeX Keeper as Registry
-Please see the following steps for EdgeX Core Data service to use EdgeX Keeper as Registry.
-### Set the `Registry` section in the configuration.toml
-#### Update the`Registry` of Core Data
-```shell
-[Registry]
-Host = "localhost"
-Port = 59883
-Type = "keeper"
-```
-
-#### Replace go-mod-registry module in edgex-go
-Skip this step if using the source code to build Core Data in this repository directly.
-
-If you would like to use the edgex-go source code to build Core Data from other repository,
-add the following line in the end of [edgex-go/go.mod](https://github.com/edgexfoundry/edgex-go/blob/main/go.mod) file to replace `go-mod-registry` module in to the one under [IOTechSystems](https://github.com/IOTechSystems/go-mod-registry) which implements Keeper as the registry option.
-```shell
-replace github.com/edgexfoundry/go-mod-registry/v2 => github.com/IOTechSystems/go-mod-registry/v2 core-keeper
-```
-
-#### Start EdgeX Keeper and Core Data
-- Start EdgeX Keeper as mentioned in [Build and run the binary executable](https://github.com/IOTechSystems/edgex-core-keeper#build-and-run-the-binary-executable).
-- Start Core Data with the following command
-    ```shell
-    ./core-data --registry
-    ```
-  or use the [Makefile](https://github.com/IOTechSystems/edgex-core-keeper/blob/main/Makefile) in this repository
-    ```shell
-    make run_core_data
-    ```
-  to build and run the binary executable of Core Data to use Keeper as registry.
-#### Invoke the EdgeX Keeper Registry API to check Core Data is registered
-```shell
-curl --location --request GET 'localhost:59883/api/v2/registry/serviceId/core-data' 
-```
+Please refer to the EdgeX Foundry [LTS policy](https://wiki.edgexfoundry.org/pages/viewpage.action?pageId=69173332) for information on support of EdgeX releases. The EdgeX community does not offer support on any non-LTS release outside of the latest release.

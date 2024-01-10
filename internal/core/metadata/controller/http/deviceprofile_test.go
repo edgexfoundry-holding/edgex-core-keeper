@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2020-2022 IOTech Ltd
+// Copyright (C) 2020-2023 IOTech Ltd
 //
 // SPDX-License-Identifier: Apache-2.0
 
@@ -18,24 +18,24 @@ import (
 	"github.com/stretchr/testify/mock"
 	"gopkg.in/yaml.v3"
 
-	bootstrapContainer "github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/container"
-	bootstrapConfig "github.com/edgexfoundry/go-mod-bootstrap/v2/config"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/di"
+	bootstrapContainer "github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/container"
+	bootstrapConfig "github.com/edgexfoundry/go-mod-bootstrap/v3/config"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/di"
 
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/clients/logger"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/common"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/dtos"
-	commonDTO "github.com/edgexfoundry/go-mod-core-contracts/v2/dtos/common"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/dtos/requests"
-	responseDTO "github.com/edgexfoundry/go-mod-core-contracts/v2/dtos/responses"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/errors"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/models"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/clients/logger"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/common"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/dtos"
+	commonDTO "github.com/edgexfoundry/go-mod-core-contracts/v3/dtos/common"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/dtos/requests"
+	responseDTO "github.com/edgexfoundry/go-mod-core-contracts/v3/dtos/responses"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/errors"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/models"
 
 	"github.com/edgexfoundry/edgex-go/internal/core/metadata/config"
 	"github.com/edgexfoundry/edgex-go/internal/core/metadata/container"
-	dbMock "github.com/edgexfoundry/edgex-go/internal/core/metadata/infrastructure/interfaces/mocks"
+	"github.com/edgexfoundry/edgex-go/internal/core/metadata/infrastructure/interfaces/mocks"
 
-	"github.com/gorilla/mux"
+	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -45,26 +45,34 @@ var testAttributes = map[string]interface{}{
 	"TestAttribute": "TestAttributeValue",
 }
 var testMappings = map[string]string{"0": "off", "1": "on"}
+var testTags = map[string]any{
+	"TestTagKey": "TestTagValue",
+}
+var testOptional = map[string]any{"TestOptionalKey": "TestOptionalValue"}
 
 func buildTestDeviceProfileRequest() requests.DeviceProfileRequest {
 	var testDeviceResources = []dtos.DeviceResource{{
 		Name:        TestDeviceResourceName,
 		Description: TestDescription,
-		Tag:         TestTag,
 		Attributes:  testAttributes,
 		Properties: dtos.ResourceProperties{
 			ValueType: common.ValueTypeInt16,
 			ReadWrite: common.ReadWrite_RW,
+			Units:     TestUnits,
+			Optional:  testOptional,
 		},
+		Tags: testTags,
 	}, {
 		Name:        TestDeviceResourceName + "-dup",
 		Description: TestDescription,
-		Tag:         TestTag,
 		Attributes:  testAttributes,
 		Properties: dtos.ResourceProperties{
 			ValueType: common.ValueTypeInt16,
 			ReadWrite: common.ReadWrite_RW,
+			Units:     TestUnits,
+			Optional:  testOptional,
 		},
+		Tags: testTags,
 	}}
 	var testDeviceCommands = []dtos.DeviceCommand{{
 		Name:      TestDeviceCommandName,
@@ -130,6 +138,7 @@ func mockDic() *di.Container {
 					LogLevel: "DEBUG",
 				},
 				Service: bootstrapConfig.ServiceInfo{
+					RequestTimeout: "30s",
 					MaxResultCount: 30,
 				},
 			}
@@ -169,7 +178,7 @@ func TestAddDeviceProfile_Created(t *testing.T) {
 	expectedRequestId := ExampleUUID
 
 	dic := mockDic()
-	dbClientMock := &dbMock.DBClient{}
+	dbClientMock := &mocks.DBClient{}
 	dbClientMock.On("AddDeviceProfile", deviceProfileModel).Return(deviceProfileModel, nil)
 	dic.Update(di.ServiceConstructorMap{
 		container.DBClientInterfaceName: func(get di.Get) interface{} {
@@ -193,6 +202,7 @@ func TestAddDeviceProfile_Created(t *testing.T) {
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
+			e := echo.New()
 			jsonData, err := json.Marshal(testCase.Request)
 			require.NoError(t, err)
 
@@ -202,8 +212,10 @@ func TestAddDeviceProfile_Created(t *testing.T) {
 
 			// Act
 			recorder := httptest.NewRecorder()
-			handler := http.HandlerFunc(controller.AddDeviceProfile)
-			handler.ServeHTTP(recorder, req)
+			c := e.NewContext(req, recorder)
+			err = controller.AddDeviceProfile(c)
+			require.NoError(t, err)
+
 			var res []commonDTO.BaseWithIdResponse
 			err = json.Unmarshal(recorder.Body.Bytes(), &res)
 
@@ -236,22 +248,22 @@ func TestAddDeviceProfile_BadRequest(t *testing.T) {
 	noDeviceResourceName := deviceProfile
 	noDeviceResourceName.Profile.DeviceResources = []dtos.DeviceResource{{
 		Description: TestDescription,
-		Tag:         TestTag,
 		Attributes:  testAttributes,
 		Properties: dtos.ResourceProperties{
 			ValueType: "INT16",
 			ReadWrite: common.ReadWrite_RW,
 		},
+		Tags: testTags,
 	}}
 	noDeviceResourcePropertyType := deviceProfile
 	noDeviceResourcePropertyType.Profile.DeviceResources = []dtos.DeviceResource{{
 		Name:        TestDeviceResourceName,
 		Description: TestDescription,
-		Tag:         TestTag,
 		Attributes:  testAttributes,
 		Properties: dtos.ResourceProperties{
 			ReadWrite: common.ReadWrite_RW,
 		},
+		Tags: testTags,
 	}}
 	noCommandName := deviceProfile
 	noCommandName.Profile.DeviceCommands = []dtos.DeviceCommand{{
@@ -276,6 +288,7 @@ func TestAddDeviceProfile_BadRequest(t *testing.T) {
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
+			e := echo.New()
 			jsonData, err := json.Marshal(testCase.Request)
 			require.NoError(t, err)
 
@@ -285,8 +298,9 @@ func TestAddDeviceProfile_BadRequest(t *testing.T) {
 
 			// Act
 			recorder := httptest.NewRecorder()
-			handler := http.HandlerFunc(controller.AddDeviceProfile)
-			handler.ServeHTTP(recorder, req)
+			c := e.NewContext(req, recorder)
+			err = controller.AddDeviceProfile(c)
+			require.NoError(t, err)
 
 			// Assert
 			assert.Equal(t, http.StatusBadRequest, recorder.Result().StatusCode, "HTTP status code not as expected")
@@ -308,7 +322,7 @@ func TestAddDeviceProfile_Duplicated(t *testing.T) {
 	duplicateNameDBError := errors.NewCommonEdgeX(errors.KindDuplicateName, fmt.Sprintf("device profile name %s exists", duplicateNameModel.Name), nil)
 
 	dic := mockDic()
-	dbClientMock := &dbMock.DBClient{}
+	dbClientMock := &mocks.DBClient{}
 	dbClientMock.On("AddDeviceProfile", duplicateNameModel).Return(duplicateNameModel, duplicateNameDBError)
 	dbClientMock.On("AddDeviceProfile", duplicateIdModel).Return(duplicateIdModel, duplicateIdDBError)
 	dic.Update(di.ServiceConstructorMap{
@@ -330,6 +344,7 @@ func TestAddDeviceProfile_Duplicated(t *testing.T) {
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
+			e := echo.New()
 			jsonData, err := json.Marshal(testCase.request)
 			require.NoError(t, err)
 
@@ -339,8 +354,10 @@ func TestAddDeviceProfile_Duplicated(t *testing.T) {
 
 			// Act
 			recorder := httptest.NewRecorder()
-			handler := http.HandlerFunc(controller.AddDeviceProfile)
-			handler.ServeHTTP(recorder, req)
+			c := e.NewContext(req, recorder)
+			err = controller.AddDeviceProfile(c)
+			require.NoError(t, err)
+
 			var res []commonDTO.BaseWithIdResponse
 			err = json.Unmarshal(recorder.Body.Bytes(), &res)
 			require.NoError(t, err)
@@ -352,6 +369,86 @@ func TestAddDeviceProfile_Duplicated(t *testing.T) {
 			assert.Equal(t, expectedRequestId, res[0].RequestId, "RequestID not as expected")
 			assert.Equal(t, http.StatusConflict, res[0].StatusCode, "BaseResponse status code not as expected")
 			assert.Contains(t, res[0].Message, testCase.expectedError.Message(), "Message not as expected")
+		})
+	}
+}
+
+func TestAddDeviceProfile_UnitsOfMeasure_Validation(t *testing.T) {
+	deviceProfileRequest := buildTestDeviceProfileRequest()
+	deviceProfileModel := requests.DeviceProfileReqToDeviceProfileModel(deviceProfileRequest)
+	expectedRequestId := ExampleUUID
+
+	emptyUnits := ""
+	invalidUnits := "invalid"
+	validReq := deviceProfileRequest
+	emptyUnitsReq := buildTestDeviceProfileRequest()
+	for i := range emptyUnitsReq.Profile.DeviceResources {
+		emptyUnitsReq.Profile.DeviceResources[i].Properties.Units = emptyUnits
+	}
+	noUnitsModel := requests.DeviceProfileReqToDeviceProfileModel(emptyUnitsReq)
+	invalidUnitsReq := buildTestDeviceProfileRequest()
+	for i := range invalidUnitsReq.Profile.DeviceResources {
+		invalidUnitsReq.Profile.DeviceResources[i].Properties.Units = invalidUnits
+	}
+
+	dic := mockDic()
+	container.ConfigurationFrom(dic.Get).Writable.UoM.Validation = true
+	dbClientMock := &mocks.DBClient{}
+	dbClientMock.On("AddDeviceProfile", deviceProfileModel).Return(deviceProfileModel, nil)
+	dbClientMock.On("AddDeviceProfile", noUnitsModel).Return(noUnitsModel, nil)
+	uomMock := &mocks.UnitsOfMeasure{}
+	uomMock.On("Validate", TestUnits).Return(true)
+	uomMock.On("Validate", "").Return(true)
+	uomMock.On("Validate", "invalid").Return(false)
+	dic.Update(di.ServiceConstructorMap{
+		container.DBClientInterfaceName: func(get di.Get) interface{} {
+			return dbClientMock
+		},
+		container.UnitsOfMeasureInterfaceName: func(get di.Get) interface{} {
+			return uomMock
+		},
+	})
+
+	controller := NewDeviceProfileController(dic)
+	assert.NotNil(t, controller)
+
+	tests := []struct {
+		name               string
+		Request            []requests.DeviceProfileRequest
+		expectedStatusCode int
+	}{
+		{"valid - expected units", []requests.DeviceProfileRequest{validReq}, http.StatusCreated},
+		{"valid - units not provided", []requests.DeviceProfileRequest{emptyUnitsReq}, http.StatusCreated},
+		{"invalid - unexpected units", []requests.DeviceProfileRequest{invalidUnitsReq}, http.StatusBadRequest},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			e := echo.New()
+			jsonData, err := json.Marshal(testCase.Request)
+			require.NoError(t, err)
+
+			reader := strings.NewReader(string(jsonData))
+			req, err := http.NewRequest(http.MethodPost, common.ApiDeviceProfileRoute, reader)
+			require.NoError(t, err)
+
+			// Act
+			recorder := httptest.NewRecorder()
+			c := e.NewContext(req, recorder)
+			err = controller.AddDeviceProfile(c)
+			require.NoError(t, err)
+
+			var res []commonDTO.BaseResponse
+			err = json.Unmarshal(recorder.Body.Bytes(), &res)
+			require.NoError(t, err)
+
+			// Assert
+			assert.Equal(t, http.StatusMultiStatus, recorder.Result().StatusCode, "HTTP status code not as expected")
+			assert.Equal(t, common.ApiVersion, res[0].ApiVersion, "API Version not as expected")
+			if res[0].RequestId != "" {
+				assert.Equal(t, expectedRequestId, res[0].RequestId, "RequestID not as expected")
+			}
+			assert.Equal(t, testCase.expectedStatusCode, res[0].StatusCode, "BaseResponse status code not as expected")
+			assert.NotEmpty(t, recorder.Body.String(), "Message is empty")
 		})
 	}
 }
@@ -371,22 +468,22 @@ func TestUpdateDeviceProfile(t *testing.T) {
 	noDeviceResourceName := deviceProfileRequest
 	noDeviceResourceName.Profile.DeviceResources = []dtos.DeviceResource{{
 		Description: TestDescription,
-		Tag:         TestTag,
 		Attributes:  testAttributes,
 		Properties: dtos.ResourceProperties{
 			ValueType: "INT16",
 			ReadWrite: common.ReadWrite_RW,
 		},
+		Tags: testTags,
 	}}
 	noDeviceResourcePropertyType := deviceProfileRequest
 	noDeviceResourcePropertyType.Profile.DeviceResources = []dtos.DeviceResource{{
 		Name:        TestDeviceResourceName,
 		Description: TestDescription,
-		Tag:         TestTag,
 		Attributes:  testAttributes,
 		Properties: dtos.ResourceProperties{
 			ReadWrite: common.ReadWrite_RW,
 		},
+		Tags: testTags,
 	}}
 	noCommandName := deviceProfileRequest
 	noCommandName.Profile.DeviceCommands = []dtos.DeviceCommand{{
@@ -402,12 +499,13 @@ func TestUpdateDeviceProfile(t *testing.T) {
 	notFoundDBError := errors.NewCommonEdgeX(errors.KindEntityDoesNotExist, fmt.Sprintf("device profile %s does not exists", notFound.Profile.Name), nil)
 
 	dic := mockDic()
-	dbClientMock := &dbMock.DBClient{}
+	dbClientMock := &mocks.DBClient{}
 	dbClientMock.On("UpdateDeviceProfile", deviceProfileModel).Return(nil)
 	dbClientMock.On("UpdateDeviceProfile", notFoundDeviceProfileModel).Return(notFoundDBError)
 	dbClientMock.On("DeviceCountByProfileName", deviceProfileModel.Name).Return(uint32(1), nil)
 	dbClientMock.On("DevicesByProfileName", 0, -1, deviceProfileModel.Name).Return([]models.Device{{ServiceName: testDeviceServiceName}}, nil)
 	dbClientMock.On("DeviceServiceByName", testDeviceServiceName).Return(models.DeviceService{}, nil)
+	dbClientMock.On("DeviceProfileByName", deviceProfileModel.Name).Return(deviceProfileModel, nil)
 	dic.Update(di.ServiceConstructorMap{
 		container.DBClientInterfaceName: func(get di.Get) interface{} {
 			return dbClientMock
@@ -433,6 +531,7 @@ func TestUpdateDeviceProfile(t *testing.T) {
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
+			e := echo.New()
 			jsonData, err := json.Marshal(testCase.request)
 			require.NoError(t, err)
 
@@ -442,8 +541,9 @@ func TestUpdateDeviceProfile(t *testing.T) {
 
 			// Act
 			recorder := httptest.NewRecorder()
-			handler := http.HandlerFunc(controller.UpdateDeviceProfile)
-			handler.ServeHTTP(recorder, req)
+			c := e.NewContext(req, recorder)
+			err = controller.UpdateDeviceProfile(c)
+			require.NoError(t, err)
 
 			if testCase.expectedStatusCode == http.StatusBadRequest {
 				var res commonDTO.BaseResponse
@@ -495,10 +595,12 @@ func TestUpdateDeviceProfile_StrictProfileChanges(t *testing.T) {
 	req, err := http.NewRequest(http.MethodPost, common.ApiDeviceProfileRoute, reader)
 	require.NoError(t, err)
 
+	e := echo.New()
 	// Act
 	recorder := httptest.NewRecorder()
-	handler := http.HandlerFunc(controller.UpdateDeviceProfile)
-	handler.ServeHTTP(recorder, req)
+	c := e.NewContext(req, recorder)
+	err = controller.UpdateDeviceProfile(c)
+	require.NoError(t, err)
 
 	var res commonDTO.BaseWithIdResponse
 	err = json.Unmarshal(recorder.Body.Bytes(), &res)
@@ -537,11 +639,13 @@ func TestPatchDeviceProfileBasicInfo(t *testing.T) {
 	notFound.BasicInfo.Name = &notFoundName
 
 	dic := mockDic()
-	dbClientMock := &dbMock.DBClient{}
+	dbClientMock := &mocks.DBClient{}
 	dbClientMock.On("DeviceProfileById", *valid.BasicInfo.Id).Return(dpModel, nil)
 	dbClientMock.On("DeviceProfileByName", *valid.BasicInfo.Name).Return(dpModel, nil)
 	dbClientMock.On("DeviceProfileByName", notFoundName).Return(dpModel, errors.NewCommonEdgeX(errors.KindEntityDoesNotExist, "not found", nil))
 	dbClientMock.On("UpdateDeviceProfile", mock.Anything).Return(nil)
+	dbClientMock.On("DeviceCountByProfileName", *valid.BasicInfo.Name).Return(uint32(1), nil)
+	dbClientMock.On("DevicesByProfileName", 0, -1, *valid.BasicInfo.Name).Return([]models.Device{{ServiceName: testDeviceServiceName}}, nil)
 	dic.Update(di.ServiceConstructorMap{
 		container.DBClientInterfaceName: func(get di.Get) interface{} {
 			return dbClientMock
@@ -565,6 +669,7 @@ func TestPatchDeviceProfileBasicInfo(t *testing.T) {
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
+			e := echo.New()
 			jsonData, err := json.Marshal(testCase.request)
 			require.NoError(t, err)
 
@@ -574,8 +679,9 @@ func TestPatchDeviceProfileBasicInfo(t *testing.T) {
 
 			// Act
 			recorder := httptest.NewRecorder()
-			handler := http.HandlerFunc(controller.PatchDeviceProfileBasicInfo)
-			handler.ServeHTTP(recorder, req)
+			c := e.NewContext(req, recorder)
+			err = controller.PatchDeviceProfileBasicInfo(c)
+			require.NoError(t, err)
 
 			if testCase.expectedStatusCode == http.StatusBadRequest {
 				var res commonDTO.BaseResponse
@@ -610,7 +716,7 @@ func TestAddDeviceProfileByYaml_Created(t *testing.T) {
 	deviceProfileModel := dtos.ToDeviceProfileModel(deviceProfileDTO)
 
 	dic := mockDic()
-	dbClientMock := &dbMock.DBClient{}
+	dbClientMock := &mocks.DBClient{}
 	dbClientMock.On("AddDeviceProfile", deviceProfileModel).Return(deviceProfileModel, nil)
 	dic.Update(di.ServiceConstructorMap{
 		container.DBClientInterfaceName: func(get di.Get) interface{} {
@@ -626,10 +732,13 @@ func TestAddDeviceProfileByYaml_Created(t *testing.T) {
 	req, err := createDeviceProfileRequestWithFile(valid)
 	require.NoError(t, err)
 
+	e := echo.New()
 	// Act
 	recorder := httptest.NewRecorder()
-	handler := http.HandlerFunc(controller.AddDeviceProfileByYaml)
-	handler.ServeHTTP(recorder, req)
+	c := e.NewContext(req, recorder)
+	err = controller.AddDeviceProfileByYaml(c)
+	require.NoError(t, err)
+
 	var res commonDTO.BaseWithIdResponse
 	err = json.Unmarshal(recorder.Body.Bytes(), &res)
 
@@ -655,22 +764,22 @@ func TestAddDeviceProfileByYaml_BadRequest(t *testing.T) {
 	noDeviceResourceName := deviceProfile
 	noDeviceResourceName.DeviceResources = []dtos.DeviceResource{{
 		Description: TestDescription,
-		Tag:         TestTag,
 		Attributes:  testAttributes,
 		Properties: dtos.ResourceProperties{
 			ValueType: "INT16",
 			ReadWrite: common.ReadWrite_RW,
 		},
+		Tags: testTags,
 	}}
 	noDeviceResourcePropertyType := deviceProfile
 	noDeviceResourcePropertyType.DeviceResources = []dtos.DeviceResource{{
 		Name:        TestDeviceResourceName,
 		Description: TestDescription,
-		Tag:         TestTag,
 		Attributes:  testAttributes,
 		Properties: dtos.ResourceProperties{
 			ReadWrite: common.ReadWrite_RW,
 		},
+		Tags: testTags,
 	}}
 	noCommandName := deviceProfile
 	noCommandName.DeviceCommands = []dtos.DeviceCommand{{
@@ -693,6 +802,7 @@ func TestAddDeviceProfileByYaml_BadRequest(t *testing.T) {
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
+			e := echo.New()
 			valid, err := yaml.Marshal(testCase.Request)
 			require.NoError(t, err)
 			req, err := createDeviceProfileRequestWithFile(valid)
@@ -700,8 +810,10 @@ func TestAddDeviceProfileByYaml_BadRequest(t *testing.T) {
 
 			// Act
 			recorder := httptest.NewRecorder()
-			handler := http.HandlerFunc(controller.AddDeviceProfileByYaml)
-			handler.ServeHTTP(recorder, req)
+			c := e.NewContext(req, recorder)
+			err = controller.AddDeviceProfileByYaml(c)
+			require.NoError(t, err)
+
 			var res commonDTO.BaseWithIdResponse
 			err = json.Unmarshal(recorder.Body.Bytes(), &res)
 			assert.NoError(t, err)
@@ -721,7 +833,7 @@ func TestAddDeviceProfileByYaml_Duplicated(t *testing.T) {
 	dbError := errors.NewCommonEdgeX(errors.KindDuplicateName, fmt.Sprintf("device profile %s already exists", TestDeviceProfileName), nil)
 
 	dic := mockDic()
-	dbClientMock := &dbMock.DBClient{}
+	dbClientMock := &mocks.DBClient{}
 	dbClientMock.On("AddDeviceProfile", deviceProfileModel).Return(deviceProfileModel, dbError)
 	dic.Update(di.ServiceConstructorMap{
 		container.DBClientInterfaceName: func(get di.Get) interface{} {
@@ -737,10 +849,13 @@ func TestAddDeviceProfileByYaml_Duplicated(t *testing.T) {
 	req, err := createDeviceProfileRequestWithFile(valid)
 	require.NoError(t, err)
 
+	e := echo.New()
 	// Act
 	recorder := httptest.NewRecorder()
-	handler := http.HandlerFunc(controller.AddDeviceProfileByYaml)
-	handler.ServeHTTP(recorder, req)
+	c := e.NewContext(req, recorder)
+	err = controller.AddDeviceProfileByYaml(c)
+	require.NoError(t, err)
+
 	var res commonDTO.BaseWithIdResponse
 	err = json.Unmarshal(recorder.Body.Bytes(), &res)
 	require.NoError(t, err)
@@ -767,10 +882,13 @@ func TestAddDeviceProfileByYaml_MissingFile(t *testing.T) {
 	req.MultipartForm = new(multipart.Form)
 	req.MultipartForm.File = nil
 
+	e := echo.New()
 	// Act
 	recorder := httptest.NewRecorder()
-	handler := http.HandlerFunc(controller.AddDeviceProfileByYaml)
-	handler.ServeHTTP(recorder, req)
+	c := e.NewContext(req, recorder)
+	err = controller.AddDeviceProfileByYaml(c)
+	require.NoError(t, err)
+
 	var res commonDTO.BaseWithIdResponse
 	err = json.Unmarshal(recorder.Body.Bytes(), &res)
 	require.NoError(t, err)
@@ -794,22 +912,22 @@ func TestUpdateDeviceProfileByYaml(t *testing.T) {
 	noDeviceResourceName := deviceProfile
 	noDeviceResourceName.DeviceResources = []dtos.DeviceResource{{
 		Description: TestDescription,
-		Tag:         TestTag,
 		Attributes:  testAttributes,
 		Properties: dtos.ResourceProperties{
 			ValueType: "INT16",
 			ReadWrite: common.ReadWrite_RW,
 		},
+		Tags: testTags,
 	}}
 	noDeviceResourcePropertyType := deviceProfile
 	noDeviceResourcePropertyType.DeviceResources = []dtos.DeviceResource{{
 		Name:        TestDeviceResourceName,
 		Description: TestDescription,
-		Tag:         TestTag,
 		Attributes:  testAttributes,
 		Properties: dtos.ResourceProperties{
 			ReadWrite: common.ReadWrite_RW,
 		},
+		Tags: testTags,
 	}}
 	noCommandName := deviceProfile
 	noCommandName.DeviceCommands = []dtos.DeviceCommand{{
@@ -825,12 +943,13 @@ func TestUpdateDeviceProfileByYaml(t *testing.T) {
 	notFoundDBError := errors.NewCommonEdgeX(errors.KindEntityDoesNotExist, fmt.Sprintf("device profile %s does not exists", notFoundDeviceProfileModel.Name), nil)
 
 	dic := mockDic()
-	dbClientMock := &dbMock.DBClient{}
+	dbClientMock := &mocks.DBClient{}
 	dbClientMock.On("UpdateDeviceProfile", validDeviceProfileModel).Return(nil)
 	dbClientMock.On("UpdateDeviceProfile", notFoundDeviceProfileModel).Return(notFoundDBError)
 	dbClientMock.On("DeviceCountByProfileName", validDeviceProfileModel.Name).Return(uint32(1), nil)
 	dbClientMock.On("DevicesByProfileName", 0, -1, validDeviceProfileModel.Name).Return([]models.Device{{ServiceName: testDeviceServiceName}}, nil)
 	dbClientMock.On("DeviceServiceByName", testDeviceServiceName).Return(models.DeviceService{}, nil)
+	dbClientMock.On("DeviceProfileByName", validDeviceProfileModel.Name).Return(validDeviceProfileModel, nil)
 	dic.Update(di.ServiceConstructorMap{
 		container.DBClientInterfaceName: func(get di.Get) interface{} {
 			return dbClientMock
@@ -856,6 +975,7 @@ func TestUpdateDeviceProfileByYaml(t *testing.T) {
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
+			e := echo.New()
 			valid, err := yaml.Marshal(testCase.request)
 			require.NoError(t, err)
 			req, err := createDeviceProfileRequestWithFile(valid)
@@ -863,8 +983,10 @@ func TestUpdateDeviceProfileByYaml(t *testing.T) {
 
 			// Act
 			recorder := httptest.NewRecorder()
-			handler := http.HandlerFunc(controller.UpdateDeviceProfileByYaml)
-			handler.ServeHTTP(recorder, req)
+			c := e.NewContext(req, recorder)
+			err = controller.UpdateDeviceProfileByYaml(c)
+			require.NoError(t, err)
+
 			var res commonDTO.BaseWithIdResponse
 			err = json.Unmarshal(recorder.Body.Bytes(), &res)
 			assert.NoError(t, err)
@@ -898,10 +1020,12 @@ func TestUpdateDeviceProfileByYaml_StrictProfileChanges(t *testing.T) {
 	req, err := createDeviceProfileRequestWithFile(validBytes)
 	require.NoError(t, err)
 
+	e := echo.New()
 	// Act
 	recorder := httptest.NewRecorder()
-	handler := http.HandlerFunc(controller.UpdateDeviceProfileByYaml)
-	handler.ServeHTTP(recorder, req)
+	c := e.NewContext(req, recorder)
+	err = controller.UpdateDeviceProfileByYaml(c)
+	require.NoError(t, err)
 
 	var res commonDTO.BaseWithIdResponse
 	err = json.Unmarshal(recorder.Body.Bytes(), &res)
@@ -920,7 +1044,7 @@ func TestDeviceProfileByName(t *testing.T) {
 	notFoundName := "notFoundName"
 
 	dic := mockDic()
-	dbClientMock := &dbMock.DBClient{}
+	dbClientMock := &mocks.DBClient{}
 	dbClientMock.On("DeviceProfileByName", deviceProfile.Name).Return(deviceProfile, nil)
 	dbClientMock.On("DeviceProfileByName", notFoundName).Return(models.DeviceProfile{}, errors.NewCommonEdgeX(errors.KindEntityDoesNotExist, "device profile doesn't exist in the database", nil))
 	dic.Update(di.ServiceConstructorMap{
@@ -944,15 +1068,18 @@ func TestDeviceProfileByName(t *testing.T) {
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
+			e := echo.New()
 			reqPath := fmt.Sprintf("%s/%s/%s", common.ApiDeviceProfileRoute, common.Name, testCase.deviceProfileName)
 			req, err := http.NewRequest(http.MethodGet, reqPath, http.NoBody)
-			req = mux.SetURLVars(req, map[string]string{common.Name: testCase.deviceProfileName})
 			require.NoError(t, err)
 
 			// Act
 			recorder := httptest.NewRecorder()
-			handler := http.HandlerFunc(controller.DeviceProfileByName)
-			handler.ServeHTTP(recorder, req)
+			c := e.NewContext(req, recorder)
+			c.SetParamNames(common.Name)
+			c.SetParamValues(testCase.deviceProfileName)
+			err = controller.DeviceProfileByName(c)
+			require.NoError(t, err)
 
 			// Assert
 			if testCase.errorExpected {
@@ -985,16 +1112,19 @@ func TestDeleteDeviceProfileByName(t *testing.T) {
 	provisionWatcherExists := "provisionWatcherExists"
 
 	dic := mockDic()
-	dbClientMock := &dbMock.DBClient{}
+	dbClientMock := &mocks.DBClient{}
 	dbClientMock.On("DevicesByProfileName", 0, 1, deviceProfile.Name).Return([]models.Device{}, nil)
 	dbClientMock.On("ProvisionWatchersByProfileName", 0, 1, deviceProfile.Name).Return([]models.ProvisionWatcher{}, nil)
 	dbClientMock.On("DeleteDeviceProfileByName", deviceProfile.Name).Return(nil)
 	dbClientMock.On("DevicesByProfileName", 0, 1, notFoundName).Return([]models.Device{}, nil)
 	dbClientMock.On("ProvisionWatchersByProfileName", 0, 1, notFoundName).Return([]models.ProvisionWatcher{}, nil)
 	dbClientMock.On("DeleteDeviceProfileByName", notFoundName).Return(errors.NewCommonEdgeX(errors.KindEntityDoesNotExist, "device profile doesn't exist in the database", nil))
-	dbClientMock.On("DevicesByProfileName", 0, 1, deviceExists).Return([]models.Device{models.Device{}}, nil)
-	dbClientMock.On("DevicesByProfileName", 0, 1, provisionWatcherExists).Return([]models.Device{}, nil)
+	dbClientMock.On("DeleteDeviceProfileByName", deviceExists).Return(errors.NewCommonEdgeX(
+		errors.KindStatusConflict, "fail to delete the device profile when associated device exists", nil))
+	dbClientMock.On("DeleteDeviceProfileByName", provisionWatcherExists).Return(errors.NewCommonEdgeX(
+		errors.KindStatusConflict, "fail to delete the device profile when associated provisionWatcher exists", nil))
 	dbClientMock.On("ProvisionWatchersByProfileName", 0, 1, provisionWatcherExists).Return([]models.ProvisionWatcher{models.ProvisionWatcher{}}, nil)
+	dbClientMock.On("DeviceProfileByName", mock.Anything).Return(models.DeviceProfile{}, nil)
 	dic.Update(di.ServiceConstructorMap{
 		container.DBClientInterfaceName: func(get di.Get) interface{} {
 			return dbClientMock
@@ -1018,15 +1148,19 @@ func TestDeleteDeviceProfileByName(t *testing.T) {
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
+			e := echo.New()
 			reqPath := fmt.Sprintf("%s/%s/%s", common.ApiDeviceProfileRoute, common.Name, testCase.deviceProfileName)
 			req, err := http.NewRequest(http.MethodDelete, reqPath, http.NoBody)
-			req = mux.SetURLVars(req, map[string]string{common.Name: testCase.deviceProfileName})
 			require.NoError(t, err)
 
 			// Act
 			recorder := httptest.NewRecorder()
-			handler := http.HandlerFunc(controller.DeleteDeviceProfileByName)
-			handler.ServeHTTP(recorder, req)
+			c := e.NewContext(req, recorder)
+			c.SetParamNames(common.Name)
+			c.SetParamValues(testCase.deviceProfileName)
+			err = controller.DeleteDeviceProfileByName(c)
+			require.NoError(t, err)
+
 			var res commonDTO.BaseResponse
 			err = json.Unmarshal(recorder.Body.Bytes(), &res)
 			require.NoError(t, err)
@@ -1057,14 +1191,17 @@ func TestDeleteDeviceProfileByName_StrictProfileChanges(t *testing.T) {
 	controller := NewDeviceProfileController(dic)
 	require.NotNil(t, controller)
 
-	req, err := http.NewRequest(http.MethodDelete, common.ApiDeviceProfileByNameRoute, http.NoBody)
-	req = mux.SetURLVars(req, map[string]string{common.Name: TestDeviceProfileName})
+	e := echo.New()
+	req, err := http.NewRequest(http.MethodDelete, common.ApiDeviceProfileByNameEchoRoute, http.NoBody)
 	require.NoError(t, err)
 
 	// Act
 	recorder := httptest.NewRecorder()
-	handler := http.HandlerFunc(controller.DeleteDeviceProfileByName)
-	handler.ServeHTTP(recorder, req)
+	c := e.NewContext(req, recorder)
+	c.SetParamNames(common.Name)
+	c.SetParamValues(TestDeviceProfileName)
+	err = controller.DeleteDeviceProfileByName(c)
+	require.NoError(t, err)
 
 	var res commonDTO.BaseResponse
 	err = json.Unmarshal(recorder.Body.Bytes(), &res)
@@ -1083,7 +1220,7 @@ func TestAllDeviceProfiles(t *testing.T) {
 	expectedTotalProfileCount := uint32(3)
 
 	dic := mockDic()
-	dbClientMock := &dbMock.DBClient{}
+	dbClientMock := &mocks.DBClient{}
 	dbClientMock.On("DeviceProfileCountByLabels", []string(nil)).Return(expectedTotalProfileCount, nil)
 	dbClientMock.On("DeviceProfileCountByLabels", testDeviceProfileLabels).Return(expectedTotalProfileCount, nil)
 	dbClientMock.On("AllDeviceProfiles", 0, 10, []string(nil)).Return(deviceProfiles, nil)
@@ -1115,6 +1252,7 @@ func TestAllDeviceProfiles(t *testing.T) {
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
+			e := echo.New()
 			req, err := http.NewRequest(http.MethodGet, common.ApiAllDeviceProfileRoute, http.NoBody)
 			query := req.URL.Query()
 			query.Add(common.Offset, testCase.offset)
@@ -1127,8 +1265,9 @@ func TestAllDeviceProfiles(t *testing.T) {
 
 			// Act
 			recorder := httptest.NewRecorder()
-			handler := http.HandlerFunc(controller.AllDeviceProfiles)
-			handler.ServeHTTP(recorder, req)
+			c := e.NewContext(req, recorder)
+			err = controller.AllDeviceProfiles(c)
+			require.NoError(t, err)
 
 			// Assert
 			if testCase.errorExpected {
@@ -1160,7 +1299,7 @@ func TestDeviceProfilesByModel(t *testing.T) {
 	expectedTotalProfileCount := uint32(3)
 
 	dic := mockDic()
-	dbClientMock := &dbMock.DBClient{}
+	dbClientMock := &mocks.DBClient{}
 	dbClientMock.On("DeviceProfileCountByModel", TestModel).Return(expectedTotalProfileCount, nil)
 	dbClientMock.On("DeviceProfilesByModel", 0, 10, TestModel).Return(deviceProfiles, nil)
 	dbClientMock.On("DeviceProfilesByModel", 1, 2, TestModel).Return([]models.DeviceProfile{deviceProfiles[1], deviceProfiles[2]}, nil)
@@ -1190,8 +1329,8 @@ func TestDeviceProfilesByModel(t *testing.T) {
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
-			req, err := http.NewRequest(http.MethodGet, common.ApiDeviceProfileByModelRoute, http.NoBody)
-			req = mux.SetURLVars(req, map[string]string{common.Model: testCase.model})
+			e := echo.New()
+			req, err := http.NewRequest(http.MethodGet, common.ApiDeviceProfileByModelEchoRoute, http.NoBody)
 			query := req.URL.Query()
 			query.Add(common.Offset, testCase.offset)
 			query.Add(common.Limit, testCase.limit)
@@ -1200,8 +1339,11 @@ func TestDeviceProfilesByModel(t *testing.T) {
 
 			// Act
 			recorder := httptest.NewRecorder()
-			handler := http.HandlerFunc(controller.DeviceProfilesByModel)
-			handler.ServeHTTP(recorder, req)
+			c := e.NewContext(req, recorder)
+			c.SetParamNames(common.Model)
+			c.SetParamValues(testCase.model)
+			err = controller.DeviceProfilesByModel(c)
+			require.NoError(t, err)
 
 			// Assert
 			if testCase.errorExpected {
@@ -1233,7 +1375,7 @@ func TestDeviceProfilesByManufacturer(t *testing.T) {
 	expectedTotalProfileCount := uint32(3)
 
 	dic := mockDic()
-	dbClientMock := &dbMock.DBClient{}
+	dbClientMock := &mocks.DBClient{}
 	dbClientMock.On("DeviceProfileCountByManufacturer", TestManufacturer).Return(expectedTotalProfileCount, nil)
 	dbClientMock.On("DeviceProfilesByManufacturer", 0, 10, TestManufacturer).Return(deviceProfiles, nil)
 	dbClientMock.On("DeviceProfilesByManufacturer", 1, 2, TestManufacturer).Return([]models.DeviceProfile{deviceProfiles[1], deviceProfiles[2]}, nil)
@@ -1263,8 +1405,8 @@ func TestDeviceProfilesByManufacturer(t *testing.T) {
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
-			req, err := http.NewRequest(http.MethodGet, common.ApiDeviceProfileByManufacturerRoute, http.NoBody)
-			req = mux.SetURLVars(req, map[string]string{common.Manufacturer: testCase.manufacturer})
+			e := echo.New()
+			req, err := http.NewRequest(http.MethodGet, common.ApiDeviceProfileByManufacturerEchoRoute, http.NoBody)
 			query := req.URL.Query()
 			query.Add(common.Offset, testCase.offset)
 			query.Add(common.Limit, testCase.limit)
@@ -1273,8 +1415,11 @@ func TestDeviceProfilesByManufacturer(t *testing.T) {
 
 			// Act
 			recorder := httptest.NewRecorder()
-			handler := http.HandlerFunc(controller.DeviceProfilesByManufacturer)
-			handler.ServeHTTP(recorder, req)
+			c := e.NewContext(req, recorder)
+			c.SetParamNames(common.Manufacturer)
+			c.SetParamValues(testCase.manufacturer)
+			err = controller.DeviceProfilesByManufacturer(c)
+			require.NoError(t, err)
 
 			// Assert
 			if testCase.errorExpected {
@@ -1306,7 +1451,7 @@ func TestDeviceProfilesByManufacturerAndModel(t *testing.T) {
 	expectedTotalProfileCount := uint32(3)
 
 	dic := mockDic()
-	dbClientMock := &dbMock.DBClient{}
+	dbClientMock := &mocks.DBClient{}
 	dbClientMock.On("DeviceProfilesByManufacturerAndModel", 0, 10, TestManufacturer, TestModel).Return(deviceProfiles, expectedTotalProfileCount, nil)
 	dbClientMock.On("DeviceProfilesByManufacturerAndModel", 1, 2, TestManufacturer, TestModel).Return([]models.DeviceProfile{deviceProfiles[1], deviceProfiles[2]}, expectedTotalProfileCount, nil)
 	dbClientMock.On("DeviceProfilesByManufacturerAndModel", 4, 1, TestManufacturer, TestModel).Return([]models.DeviceProfile{}, expectedTotalProfileCount, errors.NewCommonEdgeX(errors.KindEntityDoesNotExist, "query objects bounds out of range.", nil))
@@ -1337,8 +1482,8 @@ func TestDeviceProfilesByManufacturerAndModel(t *testing.T) {
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
-			req, err := http.NewRequest(http.MethodGet, common.ApiDeviceProfileByManufacturerAndModelRoute, http.NoBody)
-			req = mux.SetURLVars(req, map[string]string{common.Manufacturer: testCase.manufacturer, common.Model: testCase.model})
+			e := echo.New()
+			req, err := http.NewRequest(http.MethodGet, common.ApiDeviceProfileByManufacturerAndModelEchoRoute, http.NoBody)
 			query := req.URL.Query()
 			query.Add(common.Offset, testCase.offset)
 			query.Add(common.Limit, testCase.limit)
@@ -1347,8 +1492,11 @@ func TestDeviceProfilesByManufacturerAndModel(t *testing.T) {
 
 			// Act
 			recorder := httptest.NewRecorder()
-			handler := http.HandlerFunc(controller.DeviceProfilesByManufacturerAndModel)
-			handler.ServeHTTP(recorder, req)
+			c := e.NewContext(req, recorder)
+			c.SetParamNames(common.Manufacturer, common.Model)
+			c.SetParamValues(testCase.manufacturer, testCase.model)
+			err = controller.DeviceProfilesByManufacturerAndModel(c)
+			require.NoError(t, err)
 
 			// Assert
 			if testCase.errorExpected {

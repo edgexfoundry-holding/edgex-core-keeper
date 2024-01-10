@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2020 Intel Corporation
+// Copyright (c) 2023 Intel Corporation
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ import (
 
 	"github.com/edgexfoundry/edgex-go/internal"
 
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/flags"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/flags"
 )
 
 // commonFlags is a custom implementation of flags.Common from go-mod-bootstrap
@@ -39,7 +39,7 @@ func NewCommonFlags() flags.Common {
 
 // Parse parses the command-line arguments
 func (f *commonFlags) Parse(_ []string) {
-	flag.StringVar(&f.configDir, "confdir", "", "")
+	flag.StringVar(&f.configDir, "configDir", "", "")
 	flag.Usage = HelpCallback
 
 	flag.Parse()
@@ -56,7 +56,12 @@ func (f *commonFlags) Parse(_ []string) {
 
 // ConfigFileName returns the name of the local configuration file
 func (f *commonFlags) ConfigFileName() string {
-	return internal.ConfigFileName
+	return flags.DefaultConfigFile
+}
+
+// CommonConfig returns an empty string since common config is not used
+func (f *commonFlags) CommonConfig() string {
+	return ""
 }
 
 // OverwriteConfig returns false since the Configuration provider is not used
@@ -66,6 +71,11 @@ func (f *commonFlags) OverwriteConfig() bool {
 
 // UseRegistry returns false since registry is not used
 func (f *commonFlags) UseRegistry() bool {
+	return false
+}
+
+// InDevMode returns false since dev mode is not used
+func (f *commonFlags) InDevMode() bool {
 	return false
 }
 
@@ -84,6 +94,11 @@ func (f *commonFlags) ConfigDirectory() string {
 	return f.configDir
 }
 
+// RemoteServiceHosts returns nil list since is not used in this service
+func (f *commonFlags) RemoteServiceHosts() []string {
+	return nil
+}
+
 // Help displays the usage help message and exit.
 func (f *commonFlags) Help() {
 	HelpCallback()
@@ -95,7 +110,7 @@ func HelpCallback() {
 		"Usage: %s [options] <command> [arg...]\n"+
 			"Options:\n"+
 			"    -h, --help    Show this message\n"+
-			"    --confdir     Specify local configuration directory\n"+
+			"    --configDir     Specify local configuration directory\n"+
 			"\n"+
 			"Commands:\n"+
 			"    help          Show available commands (this text)\n"+

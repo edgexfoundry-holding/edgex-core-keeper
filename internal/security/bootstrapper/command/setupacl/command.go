@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright 2021 Intel Corporation
+ * Copyright 2023 Intel Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
@@ -16,7 +16,6 @@
 package setupacl
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -37,15 +36,18 @@ import (
 	"github.com/edgexfoundry/edgex-go/internal/security/bootstrapper/config"
 	"github.com/edgexfoundry/edgex-go/internal/security/bootstrapper/helper"
 	"github.com/edgexfoundry/edgex-go/internal/security/bootstrapper/interfaces"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/environment"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/secret"
+	bootstrapConfig "github.com/edgexfoundry/go-mod-bootstrap/v3/config"
 
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/startup"
-
-	"github.com/edgexfoundry/go-mod-secrets/v2/pkg"
-	"github.com/edgexfoundry/go-mod-secrets/v2/pkg/token/authtokenloader"
-	"github.com/edgexfoundry/go-mod-secrets/v2/pkg/token/fileioperformer"
-
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/clients/logger"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/common"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/startup"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/clients/logger"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/common"
+	"github.com/edgexfoundry/go-mod-secrets/v3/pkg"
+	"github.com/edgexfoundry/go-mod-secrets/v3/pkg/token/authtokenloader"
+	"github.com/edgexfoundry/go-mod-secrets/v3/pkg/token/fileioperformer"
+	"github.com/edgexfoundry/go-mod-secrets/v3/pkg/types"
+	"github.com/edgexfoundry/go-mod-secrets/v3/secrets"
 )
 
 const (
@@ -60,17 +62,18 @@ const (
 	emptyLeader                = `""`
 
 	// environment variable contains a comma separated list of registry role names to be added
-	addRegistryRolesEnvKey = "ADD_REGISTRY_ACL_ROLES"
+	addRegistryRolesEnvKey = "EDGEX_ADD_REGISTRY_ACL_ROLES"
 )
 
 type cmd struct {
-	loggingClient logger.LoggingClient
-	client        internal.HttpCaller
-	configuration *config.ConfigurationStruct
+	loggingClient   logger.LoggingClient
+	client          internal.HttpCaller
+	configuration   *config.ConfigurationStruct
+	secretStoreinfo *bootstrapConfig.SecretStoreInfo
 
 	// internal state
 	retryTimeout           time.Duration
-	bootstrapACLTokenCache *BootStrapACLTokenInfo
+	bootstrapACLTokenCache *types.BootStrapACLTokenInfo
 	secretstoreTokenCache  string
 }
 
@@ -90,11 +93,17 @@ func NewCommand(
 	var dummy string
 
 	flagSet := flag.NewFlagSet(CommandName, flag.ContinueOnError)
-	flagSet.StringVar(&dummy, "confdir", "", "") // handled by bootstrap; duplicated here to prevent arg parsing errors
+	flagSet.StringVar(&dummy, "configDir", "", "") // handled by bootstrap; duplicated here to prevent arg parsing errors
 
 	err := flagSet.Parse(args)
 	if err != nil {
 		return nil, fmt.Errorf("Unable to parse command: %s: %w", strings.Join(args, " "), err)
+	}
+
+	envVars := environment.NewVariables(lc)
+	cmd.secretStoreinfo, err = secret.BuildSecretStoreConfig(common.SecurityBootstrapperKey, envVars, lc)
+	if err != nil {
+		return nil, fmt.Errorf("unable to create SecretStore configuration %v", err)
 	}
 
 	return &cmd, nil
@@ -141,8 +150,13 @@ func (c *cmd) Execute() (statusCode int, err error) {
 		return interfaces.StatusCodeExitWithError, fmt.Errorf("failed to retrieve secretstore token: %v", err)
 	}
 
-	// configure Consul access with both Secret Store token and consul's bootstrap acl token
-	if err := c.configureConsulAccess(secretstoreToken, bootstrapACLToken.SecretID); err != nil {
+	client, err := c.createSecretStoreClient(c.configuration)
+	if err != nil {
+		return interfaces.StatusCodeExitWithError, fmt.Errorf("failed to create SecretStoreClient: %s", err.Error())
+	}
+	//configure Consul access with both Secret Store token and consul's bootstrap acl token
+	if err := client.ConfigureConsulAccess(secretstoreToken, bootstrapACLToken.SecretID,
+		c.configuration.StageGate.Registry.Host, c.configuration.StageGate.Registry.Port); err != nil {
 		return interfaces.StatusCodeExitWithError, fmt.Errorf("failed to configure Consul access: %v", err)
 	}
 
@@ -162,7 +176,7 @@ func (c *cmd) Execute() (statusCode int, err error) {
 	}
 
 	// write a sentinel file to indicate Consul ACL bootstrap is done so that we don't bootstrap ACL again,
-	// this is to avoid re-bootstrapping error and that error can cause the snap crash if restart this process
+	// this is to avoid re-bootstrapping error
 	if err := c.writeSentinelFile(); err != nil {
 		return interfaces.StatusCodeExitWithError, fmt.Errorf("failed to write sentinel file: %v", err)
 	}
@@ -187,8 +201,33 @@ func (c *cmd) reSetup() error {
 	}
 
 	// set up roles for both static and dynamic again in case there're changes
-	if err := c.reSetupEdgeXACLTokenRoles(); err != nil {
+	err := c.reSetupEdgeXACLTokenRoles()
+	if err != nil {
 		return fmt.Errorf("on 2nd time or later, failed to re-set up roles: %v", err)
+	}
+
+	bootstrapACLToken, err := c.reconstructBootstrapACLToken()
+	if err != nil {
+		return fmt.Errorf("failed on reconstructBootstrapACLToken: %v", err)
+	}
+	// if management token file is not there anymore we need to recreate and save again
+	managmentTokenFilePath := strings.TrimSpace(c.configuration.StageGate.Registry.ACL.ManagementTokenPath)
+	if len(managmentTokenFilePath) == 0 {
+		return errors.New("required StageGate_Registry_ACL_ManagementTokenPath from configuration is empty")
+	}
+
+	tokenFileAbsPath, err := filepath.Abs(managmentTokenFilePath)
+	if err != nil {
+		return fmt.Errorf("failed to convert tokenFile to absolute path %s: %v", managmentTokenFilePath, err)
+	}
+
+	if exists := helper.CheckIfFileExists(tokenFileAbsPath); !exists {
+		err := c.createAndSaveManagementACLToken(bootstrapACLToken)
+		if err != nil {
+			return fmt.Errorf("failed to create and save management ACL token into json file: %v", err)
+		}
+	} else {
+		c.loggingClient.Infof("management ACL token json file already exists!")
 	}
 
 	return nil
@@ -214,7 +253,7 @@ func (c *cmd) reSetupEdgeXACLTokenRoles() error {
 	return nil
 }
 
-func (c *cmd) createBootstrapACLToken() (*BootStrapACLTokenInfo, error) {
+func (c *cmd) createBootstrapACLToken() (*types.BootStrapACLTokenInfo, error) {
 	bootstrapACLToken, err := c.generateBootStrapACLToken()
 	if err != nil {
 		// although we have a leader, but it is a very very rare chance that we could hit an error on legacy mode
@@ -240,44 +279,107 @@ func (c *cmd) createBootstrapACLToken() (*BootStrapACLTokenInfo, error) {
 	return bootstrapACLToken, nil
 }
 
-func (c *cmd) saveACLTokens(bootstrapACLToken *BootStrapACLTokenInfo) error {
+func (c *cmd) saveACLTokens(bootstrapACLToken *types.BootStrapACLTokenInfo) error {
 	// Save the bootstrap ACL token into json file so that it can be used later on
 	if err := c.saveBootstrapACLToken(bootstrapACLToken); err != nil {
 		return fmt.Errorf("failed to save registry's bootstrap ACL token: %v", err)
 	}
 
+	if err := c.createAndSaveManagementACLToken(bootstrapACLToken); err != nil {
+		return fmt.Errorf("failed to create and save management ACL token: %v", err)
+	}
 	return nil
 }
 
-// createEdgeXACLTokenRoles creates secret store roles that can be used for genearting registry tokens
-// via Consul secret engine API /consul/creds/[role_name] later on for all EdgeX microservices
-func (c *cmd) createEdgeXACLTokenRoles(bootstrapACLTokenID, secretstoreToken string) error {
-	edgexServicePolicy, err := c.getOrCreateRegistryPolicy(bootstrapACLTokenID, edgeXServicePolicyName, edgeXPolicyRules)
+func (c *cmd) createAndSaveManagementACLToken(bootstrapACLToken *types.BootStrapACLTokenInfo) error {
+	// create and save management token into json file in order to use later
+	managementACLTokenInfo, err := c.createManagementToken(*bootstrapACLToken)
 	if err != nil {
-		return fmt.Errorf("failed to create edgex service policy: %v", err)
+		return fmt.Errorf("failed to create management ACL token: %v", err)
 	}
 
+	err = c.saveManagementACLToken(managementACLTokenInfo)
+	if err != nil {
+		return fmt.Errorf("failed to save management ACL token into json file: %v", err)
+	}
+
+	return nil
+}
+
+// createEdgeXACLTokenRoles creates secret store roles that can be used for generating registry tokens
+// via Consul secret engine API /consul/creds/[role_name] later on for all EdgeX microservices
+func (c *cmd) createEdgeXACLTokenRoles(bootstrapACLTokenID, secretstoreToken string) error {
 	roleNames, err := c.getUniqueRoleNames()
 	if err != nil {
 		return fmt.Errorf("failed to get unique role names: %v", err)
 	}
 
+	client, err := c.createSecretStoreClient(c.configuration)
+	if err != nil {
+		return fmt.Errorf("failed to create SecretStoreClient: %s", err.Error())
+	}
 	// create registry roles for EdgeX
 	for roleName := range roleNames {
+		// create policy for each service role
+		servicePolicyRules := `
+			# HCL definition of server agent policy for EdgeX
+			node "" {
+				policy = "read"
+			}
+			node_prefix "edgex" {
+				policy = "write"
+			}
+			service "` + roleName + `" {
+				policy = "write"
+			}
+			service_prefix "" {
+				policy = "read"
+			}
+			key_prefix "` + c.getKeyPrefix(roleName) + `" {
+				policy = "write"
+			}
+			key_prefix "` + c.getKeyPrefix(common.CoreCommonConfigServiceKey) + `" {
+					policy = "read"
+				}
+		`
+
+		edgexServicePolicy, err := c.getOrCreateRegistryPolicy(bootstrapACLTokenID, "acl_policy_for_"+roleName, servicePolicyRules)
+		if err != nil {
+			return fmt.Errorf("failed to create edgex service policy: %v", err)
+		}
+
 		// create roles based on the service keys as the role names
-		// in phase 2, we are using the same policy rule for all services
-		edgexACLTokenRole := NewRegistryRole(roleName, ClientType, []Policy{
+		edgexACLTokenRole := types.NewConsulRole(roleName, types.ClientType, []types.Policy{
 			*edgexServicePolicy,
 			// localUse set to false as some EdgeX services may be running in a different node
 		}, false)
 
-		// fail all if any one of the role creation failed
-		if err := c.createRole(secretstoreToken, edgexACLTokenRole); err != nil {
+		if err := client.CreateRole(secretstoreToken, edgexACLTokenRole); err != nil {
 			return fmt.Errorf("failed to create edgex role: %v", err)
 		}
 	}
 
 	return nil
+}
+
+// getKeyPrefix get the consul ACL key prefix for the service with the input roleName, ie. the service key-based
+// Currently we support 3 types of services: app services, device services, and security services
+// if the input role name does not fall into the above types, then it is categorized into core type for the key prefix
+func (c *cmd) getKeyPrefix(roleName string) string {
+	if strings.HasPrefix(roleName, "app-") {
+		return common.ConfigStemApp + "/" + roleName
+	}
+
+	if strings.HasPrefix(roleName, "device-") {
+		return common.ConfigStemDevice + "/" + roleName
+	}
+
+	if strings.HasPrefix(roleName, "security-") {
+		return common.ConfigStemSecurity + "/" + roleName
+	}
+
+	// anything else falls into the 3rd category: core bucket
+	return common.ConfigStemCore + "/" + roleName
 }
 
 func (c *cmd) getUniqueRoleNames() (map[string]struct{}, error) {
@@ -367,7 +469,7 @@ func getUniqueRolesFromEnv() (map[string]struct{}, error) {
 
 // setupAgentToken is to set up the agent token using the inputToken to the running agent if haven't set up yet
 // if the inputToken is nil then it will try to reconstruct from the saved file
-func (c *cmd) setupAgentToken(inputToken *BootStrapACLTokenInfo) error {
+func (c *cmd) setupAgentToken(inputToken *types.BootStrapACLTokenInfo) error {
 	var err error
 	setupAlreadyPrevious := false
 	bootstrapACLToken := inputToken
@@ -409,7 +511,7 @@ func (c *cmd) setupAgentToken(inputToken *BootStrapACLTokenInfo) error {
 }
 
 // reconstructBootstrapACLToken reads bootstrap ACL token from the saved file and reconstruct it into BootStrapACLTokenInfo
-func (c *cmd) reconstructBootstrapACLToken() (*BootStrapACLTokenInfo, error) {
+func (c *cmd) reconstructBootstrapACLToken() (*types.BootStrapACLTokenInfo, error) {
 	if c.bootstrapACLTokenCache != nil {
 		// re-use the cached one
 		return c.bootstrapACLTokenCache, nil
@@ -436,7 +538,7 @@ func (c *cmd) reconstructBootstrapACLToken() (*BootStrapACLTokenInfo, error) {
 		return nil, fmt.Errorf("failed to open file reader: %v", err)
 	}
 
-	var bootstrapACLToken BootStrapACLTokenInfo
+	var bootstrapACLToken types.BootStrapACLTokenInfo
 	if err := json.NewDecoder(tokenReader).Decode(&bootstrapACLToken); err != nil {
 		return nil, fmt.Errorf("failed to parse token data into BootStrapACLTokenInfo: %v", err)
 	}
@@ -566,65 +668,6 @@ func (c *cmd) retrieveSecretStoreTokenFromFile() (string, error) {
 	return secretStoreToken, nil
 }
 
-// configureConsulAccess is to enable the Consul config access to the SecretStore via consul/config/access API
-// see the reference: https://www.vaultproject.io/api-docs/secret/consul#configure-access
-func (c *cmd) configureConsulAccess(secretStoreToken string, bootstrapACLToken string) error {
-	configAccessURL := fmt.Sprintf("%s://%s:%d%s", c.configuration.SecretStore.Protocol,
-		c.configuration.SecretStore.Host, c.configuration.SecretStore.Port, consulConfigAccessVaultAPI)
-	_, err := url.Parse(configAccessURL)
-	if err != nil {
-		return fmt.Errorf("failed to parse config Access URL: %v", err)
-	}
-
-	c.loggingClient.Debugf("configAccessURL: %s", configAccessURL)
-
-	type ConfigAccess struct {
-		RegistryAddress   string `json:"address"`
-		BootstrapACLToken string `json:"token"`
-	}
-
-	payload := &ConfigAccess{
-		RegistryAddress:   fmt.Sprintf("%s:%d", c.configuration.StageGate.Registry.Host, c.configuration.StageGate.Registry.Port),
-		BootstrapACLToken: bootstrapACLToken,
-	}
-
-	jsonPayload, err := json.Marshal(payload)
-	c.loggingClient.Tracef("payload: %v", payload)
-	if err != nil {
-		return fmt.Errorf("Failed to marshal JSON string payload: %v", err)
-	}
-
-	req, err := http.NewRequest(http.MethodPost, configAccessURL, bytes.NewBuffer(jsonPayload))
-	if err != nil {
-		return fmt.Errorf("Failed to prepare POST request for http URL: %w", err)
-	}
-
-	req.Header.Add("X-Vault-Token", secretStoreToken)
-	req.Header.Add(common.ContentType, common.ContentTypeJSON)
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("Failed to send request for http URL: %w", err)
-	}
-
-	defer func() {
-		_ = resp.Body.Close()
-	}()
-
-	switch resp.StatusCode {
-	case http.StatusNoContent:
-		// no response body returned in this case
-		c.loggingClient.Info("successfully configure Consul access for secretstore")
-		return nil
-	default:
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			c.loggingClient.Errorf("cannot read resp.Body: %v", err)
-		}
-		return fmt.Errorf("failed to configure Consul access for secretstore via URL [%s] and status code= %d: %s",
-			configAccessURL, resp.StatusCode, string(body))
-	}
-}
-
 func (c *cmd) writeSentinelFile() error {
 	absPath, err := filepath.Abs(c.configuration.StageGate.Registry.ACL.SentinelFilePath)
 	if err != nil {
@@ -648,4 +691,20 @@ func (c *cmd) writeSentinelFile() error {
 	}
 
 	return nil
+}
+
+func (c *cmd) createSecretStoreClient(secretConfig *config.ConfigurationStruct) (secrets.SecretStoreClient, error) {
+	clientConfig := types.SecretConfig{
+		Type:     secrets.Vault,
+		Host:     c.secretStoreinfo.Host,
+		Port:     c.secretStoreinfo.Port,
+		Protocol: c.secretStoreinfo.Protocol,
+	}
+
+	client, err := secrets.NewSecretStoreClient(clientConfig, c.loggingClient, c.client)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create SecretStoreClient: %s", err.Error())
+	}
+
+	return client, nil
 }

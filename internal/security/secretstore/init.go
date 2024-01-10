@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright 2021 Intel Corporation
+ * Copyright 2022-2023 Intel Corporation
  * Copyright 2019 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
@@ -38,26 +38,28 @@ import (
 	"github.com/edgexfoundry/edgex-go/internal/security/secretstore/secretsengine"
 	"github.com/edgexfoundry/edgex-go/internal/security/secretstore/tokenfilewriter"
 
-	bootstrapContainer "github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/container"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/startup"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/di"
+	bootstrapContainer "github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/container"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/startup"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/di"
 
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/clients/logger"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/clients/logger"
 
-	"github.com/edgexfoundry/go-mod-secrets/v2/pkg"
-	"github.com/edgexfoundry/go-mod-secrets/v2/pkg/token/fileioperformer"
-	"github.com/edgexfoundry/go-mod-secrets/v2/pkg/types"
-	"github.com/edgexfoundry/go-mod-secrets/v2/secrets"
+	"github.com/edgexfoundry/go-mod-secrets/v3/pkg"
+	"github.com/edgexfoundry/go-mod-secrets/v3/pkg/token/fileioperformer"
+	"github.com/edgexfoundry/go-mod-secrets/v3/pkg/types"
+	"github.com/edgexfoundry/go-mod-secrets/v3/secrets"
 )
 
 const (
-	addKnownSecretsEnv   = "ADD_KNOWN_SECRETS"
+	addKnownSecretsEnv   = "EDGEX_ADD_KNOWN_SECRETS" // nolint:gosec
 	redisSecretName      = "redisdb"
+	messagebusSecretName = "message-bus"
 	knownSecretSeparator = ","
 	serviceListBegin     = "["
 	serviceListEnd       = "]"
 	serviceListSeparator = ";"
 	secretBasePath       = "/v1/secret/edgex" // nolint:gosec
+	defaultMsgBusUser    = "msgbususer"
 )
 
 var errNotFound = errors.New("credential NOT found")
@@ -72,7 +74,7 @@ func NewBootstrap(insecureSkipVerify bool, vaultInterval int) *Bootstrap {
 	return &Bootstrap{
 		insecureSkipVerify: insecureSkipVerify,
 		vaultInterval:      vaultInterval,
-		validKnownSecrets:  map[string]bool{redisSecretName: true},
+		validKnownSecrets:  map[string]bool{redisSecretName: true, messagebusSecretName: true},
 	}
 }
 
@@ -80,7 +82,6 @@ func NewBootstrap(insecureSkipVerify bool, vaultInterval int) *Bootstrap {
 func (b *Bootstrap) BootstrapHandler(ctx context.Context, _ *sync.WaitGroup, _ startup.Timer, dic *di.Container) bool {
 	configuration := container.ConfigurationFrom(dic.Get)
 	secretStoreConfig := configuration.SecretStore
-	kongAdminConfig := configuration.KongAdmin
 	lc := bootstrapContainer.LoggingClientFrom(dic.Get)
 
 	//step 1: boot up secretstore general steps same as other EdgeX microservice
@@ -121,7 +122,7 @@ func (b *Bootstrap) BootstrapHandler(ctx context.Context, _ *sync.WaitGroup, _ s
 	keyDeriver := kdf.NewKdf(fileOpener, secretStoreConfig.TokenFolderPath, sha256.New)
 	vmkEncryption := NewVMKEncryption(fileOpener, pipedHexReader, keyDeriver)
 
-	hook := os.Getenv("IKM_HOOK")
+	hook := os.Getenv("EDGEX_IKM_HOOK")
 	if len(hook) > 0 {
 		err := vmkEncryption.LoadIKM(hook)
 		defer vmkEncryption.WipeIKM() // Ensure IKM is wiped from memory
@@ -131,7 +132,7 @@ func (b *Bootstrap) BootstrapHandler(ctx context.Context, _ *sync.WaitGroup, _ s
 		}
 		lc.Info("Enabled encryption of Vault master key")
 	} else {
-		lc.Info("vault master key encryption not enabled. IKM_HOOK not set.")
+		lc.Info("vault master key encryption not enabled. EDGEX_IKM_HOOK not set.")
 	}
 
 	var initResponse types.InitResponse // reused many places in below flow
@@ -145,7 +146,7 @@ func (b *Bootstrap) BootstrapHandler(ctx context.Context, _ *sync.WaitGroup, _ s
 			switch sCode {
 			case http.StatusOK:
 				// Load the init response from disk since we need it to regenerate root token later
-				if err := loadInitResponse(lc, fileOpener, secretStoreConfig, &initResponse); err != nil {
+				if err := LoadInitResponse(lc, fileOpener, secretStoreConfig, &initResponse); err != nil {
 					lc.Errorf("unable to load init response: %s", err.Error())
 					return true
 				}
@@ -194,7 +195,7 @@ func (b *Bootstrap) BootstrapHandler(ctx context.Context, _ *sync.WaitGroup, _ s
 
 			case http.StatusServiceUnavailable:
 				lc.Infof("vault is sealed (status code: %d). Starting unseal phase", sCode)
-				if err := loadInitResponse(lc, fileOpener, secretStoreConfig, &initResponse); err != nil {
+				if err := LoadInitResponse(lc, fileOpener, secretStoreConfig, &initResponse); err != nil {
 					lc.Errorf("unable to load init response: %s", err.Error())
 					return true
 				}
@@ -267,7 +268,7 @@ func (b *Bootstrap) BootstrapHandler(ctx context.Context, _ *sync.WaitGroup, _ s
 	rootToken, err = client.RegenRootToken(initResponse.Keys)
 	if err != nil {
 		lc.Errorf("could not regenerate root token %s", err.Error())
-		os.Exit(1)
+		return false
 	}
 	defer func() {
 		// Revoke transient root token at the end of this function
@@ -285,7 +286,7 @@ func (b *Bootstrap) BootstrapHandler(ctx context.Context, _ *sync.WaitGroup, _ s
 			initResponse.RootToken = ""
 			if err := saveInitResponse(lc, fileOpener, secretStoreConfig, &initResponse); err != nil {
 				lc.Errorf("unable to save init response: %s", err.Error())
-				os.Exit(1)
+				return false
 			}
 			lc.Info("Root token stripped from init response (on disk) for security reasons")
 		}
@@ -309,7 +310,7 @@ func (b *Bootstrap) BootstrapHandler(ctx context.Context, _ *sync.WaitGroup, _ s
 			CreateAndWrite(rootToken, secretStoreConfig.TokenProviderAdminTokenPath, tokenMaintenance.CreateTokenIssuingToken)
 		if err != nil {
 			lc.Errorf("failed to create token issuing token: %s", err.Error())
-			os.Exit(1)
+			return false
 		}
 		if secretStoreConfig.TokenProviderType == OneShotProvider {
 			// Revoke the admin token at the end of the current function if running a one-shot provider
@@ -318,16 +319,43 @@ func (b *Bootstrap) BootstrapHandler(ctx context.Context, _ *sync.WaitGroup, _ s
 		}
 	}
 
+	// Enable userpass auth engine
+	upAuthEnabled, err := client.CheckAuthMethodEnabled(rootToken, UPAuthMountPoint, UserPassAuthEngine)
+	if err != nil {
+		lc.Errorf("failed to check if %s auth method enabled: %s", UserPassAuthEngine, err.Error())
+		return false
+	} else if !upAuthEnabled {
+		// Enable userpass engine at /v1/auth/{eng.path} path (/v1 prefix supplied by Vault)
+		lc.Infof("Enabling userpass authentication for the first time...")
+		if err := client.EnablePasswordAuth(rootToken, UPAuthMountPoint); err != nil {
+			lc.Errorf("failed to enable userpass secrets engine: %s", err.Error())
+			return false
+		}
+		lc.Infof("Userpass authentication engine enabled at path %s", UPAuthMountPoint)
+	}
+
+	// Create a key for issuing JWTs
+	keyExists, err := client.CheckIdentityKeyExists(rootToken, "edgex-identity")
+	if err != nil {
+		lc.Errorf("failed to check for JWT issuing key: %s", err.Error())
+		return false
+	} else if !keyExists {
+		if err := client.CreateNamedIdentityKey(rootToken, "edgex-identity", "ES384"); err != nil {
+			lc.Errorf("failed to create JWT issuing key: %s", err.Error())
+			return false
+		}
+	}
+
 	//Step 4: Launch token handler
 	tokenProvider := NewTokenProvider(ctx, lc, NewDefaultExecRunner())
 	if secretStoreConfig.TokenProvider != "" {
 		if err := tokenProvider.SetConfiguration(secretStoreConfig); err != nil {
 			lc.Errorf("failed to configure token provider: %s", err.Error())
-			os.Exit(1)
+			return false
 		}
 		if err := tokenProvider.Launch(); err != nil {
 			lc.Errorf("token provider failed: %s", err.Error())
-			os.Exit(1)
+			return false
 		}
 	} else {
 		lc.Info("no token provider configured")
@@ -337,89 +365,170 @@ func (b *Bootstrap) BootstrapHandler(ctx context.Context, _ *sync.WaitGroup, _ s
 	if err := secretsengine.New(secretsengine.KVSecretsEngineMountPoint, secretsengine.KeyValue).
 		Enable(&rootToken, lc, client); err != nil {
 		lc.Errorf("failed to enable KV secrets engine: %s", err.Error())
-		os.Exit(1)
+		return false
 	}
 
 	knownSecretsToAdd, err := b.getKnownSecretsToAdd()
 	if err != nil {
 		lc.Error(err.Error())
-		os.Exit(1)
+		return false
 	}
 
 	// credential creation
 	gen := NewPasswordGenerator(lc, secretStoreConfig.PasswordProvider, secretStoreConfig.PasswordProviderArgs)
-	cred := NewCred(httpCaller, rootToken, gen, secretStoreConfig.GetBaseURL(), lc)
+	secretStore := NewCred(httpCaller, rootToken, gen, secretStoreConfig.GetBaseURL(), lc)
 
 	// continue credential creation
 
-	// A little note on why there are two secrets paths. For each microservice, the
+	// A little note on why there are two secrets names. For each microservice, the redis
 	// username/password is uploaded to the vault on both /v1/secret/edgex/%s/redisdb and
-	// /v1/secret/edgex/redisdb/%s). The go-mod-secrets client requires a Path property to prefix all
+	// /v1/secret/edgex/redisdb/%s). The go-mod-secrets client requires a SecretName property to prefix all
 	// secrets.
 	// So edgex/%s/redisdb is for the microservices (microservices are restricted to their specific
 	// edgex/%s), and edgex/redisdb/* is enumerated to initialize the database.
-	//
+	// Similary for secure message bus credential.
 
 	// Redis 5.x only supports a single shared password. When Redis 6 is released, this can be updated
 	// to a per service password.
 
-	redis5Pair, err := getDBCredential("security-bootstrapper-redis", cred, "redisdb")
+	redisCredentials, err := getCredential("security-bootstrapper-redis", secretStore, redisSecretName)
 	if err != nil {
 		if err != errNotFound {
-			lc.Error("failed to determine if Redis credentials already exist or not: %w", err)
-			os.Exit(1)
+			lc.Errorf("failed to determine if Redis credentials already exist or not: %s", err.Error())
+			return false
 		}
 
 		lc.Info("Generating new password for Redis DB")
-		redis5Password, err := cred.GeneratePassword(ctx)
+		defaultPassword, err := secretStore.GeneratePassword(ctx)
 		if err != nil {
-			lc.Error("failed to generate redis5 password")
-			os.Exit(1)
+			lc.Error("failed to generate default password for redisdb")
+			return false
 		}
 
-		redis5Pair = UserPasswordPair{
-			User:     "redis5",
-			Password: redis5Password,
+		redisCredentials = UserPasswordPair{
+			User:     "default",
+			Password: defaultPassword,
 		}
 	} else {
 		lc.Info("Redis DB credentials exist, skipping generating new password")
 	}
 
 	// Add any additional services that need the known DB secret
+	lc.Infof("adding any additional services using redisdb for knownSecrets...")
 	services, ok := knownSecretsToAdd[redisSecretName]
 	if ok {
 		for _, service := range services {
-			configuration.Databases[service] = config.Database{
-				Service: service,
+			err = addServiceCredential(lc, redisSecretName, secretStore, service, redisCredentials)
+			if err != nil {
+				lc.Error(err.Error())
+				return false
 			}
 		}
 	}
 
+	lc.Infof("adding redisdb secret name for internal services...")
 	for _, info := range configuration.Databases {
 		service := info.Service
 
 		// add credentials to service path if specified and they're not already there
 		if len(service) != 0 {
-			err = addServiceCredential(lc, "redisdb", cred, service, redis5Pair)
+			err = addServiceCredential(lc, redisSecretName, secretStore, service, redisCredentials)
 			if err != nil {
 				lc.Error(err.Error())
-				os.Exit(1)
+				return false
+			}
+		}
+	}
+	// security-bootstrapper-redis uses the path /v1/secret/edgex/security-bootstrapper-redis/ and go-mod-bootstrap
+	// with append the DB type (redisdb)
+	err = storeCredential(lc, "security-bootstrapper-redis", secretStore, redisSecretName, redisCredentials)
+	if err != nil {
+		lc.Error(err.Error())
+		return false
+	}
+
+	// for secure message bus creds
+	var msgBusCredentials UserPasswordPair
+	if configuration.SecureMessageBus.Type != redisSecureMessageBusType &&
+		configuration.SecureMessageBus.Type != noneSecureMessageBusType &&
+		configuration.SecureMessageBus.Type != blankSecureMessageBusType {
+		msgBusCredentials, err = getCredential(internal.BootstrapMessageBusServiceKey, secretStore, messagebusSecretName)
+		if err != nil {
+			if err != errNotFound {
+				lc.Errorf("failed to determine if %s credentials already exist or not: %s", configuration.SecureMessageBus.Type, err.Error())
+				return false
+			}
+
+			lc.Infof("Generating new password for %s bus", configuration.SecureMessageBus.Type)
+			msgBusPassword, err := secretStore.GeneratePassword(ctx)
+			if err != nil {
+				lc.Errorf("failed to generate password for %s bus", configuration.SecureMessageBus.Type)
+				return false
+			}
+
+			msgBusCredentials = UserPasswordPair{
+				User:     defaultMsgBusUser,
+				Password: msgBusPassword,
+			}
+		} else {
+			lc.Infof("%s bus credentials already exist, skipping generating new password", configuration.SecureMessageBus.Type)
+		}
+
+		lc.Infof("adding any additional services using %s for knownSecrets...", messagebusSecretName)
+		services, ok := knownSecretsToAdd[messagebusSecretName]
+		if ok {
+			for _, service := range services {
+				err = addServiceCredential(lc, messagebusSecretName, secretStore, service, msgBusCredentials)
+				if err != nil {
+					lc.Error(err.Error())
+					return false
+				}
+			}
+		}
+		err = storeCredential(lc, internal.BootstrapMessageBusServiceKey, secretStore, messagebusSecretName, msgBusCredentials)
+		if err != nil {
+			lc.Error(err.Error())
+			return false
+		}
+	}
+
+	// determine the type of message bus
+	messageBusType := configuration.SecureMessageBus.Type
+	var creds UserPasswordPair
+	supportedSecureType := true
+	var secretName string
+	switch messageBusType {
+	case redisSecureMessageBusType:
+		creds = redisCredentials
+		secretName = redisSecretName
+	case mqttSecureMessageBusType:
+		creds = msgBusCredentials
+		secretName = messagebusSecretName
+	default:
+		supportedSecureType = false
+		lc.Warnf("secure message bus '%s' is not supported", messageBusType)
+	}
+
+	if supportedSecureType {
+		lc.Infof("adding credentials for '%s' message bus for internal services...", messageBusType)
+		for _, info := range configuration.SecureMessageBus.Services {
+			service := info.Service
+
+			// add credentials to service path if specified and they're not already there
+			if len(service) != 0 {
+				err = addServiceCredential(lc, secretName, secretStore, service, creds)
+				if err != nil {
+					lc.Error(err.Error())
+					return false
+				}
 			}
 		}
 	}
 
-	// security-bootstrapper-redis uses the path /v1/secret/edgex/security-bootstrapper-redis/ and go-mod-bootstrap
-	// with append the DB type (redisdb)
-	err = addDBCredential(lc, "security-bootstrapper-redis", cred, "redisdb", redis5Pair)
-	if err != nil {
-		lc.Error(err.Error())
-		os.Exit(1)
-	}
-
-	err = ConfigureSecureMessageBus(configuration.SecureMessageBus, redis5Pair, lc)
+	err = ConfigureSecureMessageBus(configuration.SecureMessageBus, creds, lc)
 	if err != nil {
 		lc.Errorf("failed to configure for Secure Message Bus: %s", err.Error())
-		os.Exit(1)
+		return false
 	}
 
 	// Concat all cert path secretStore values together to check for empty values
@@ -435,7 +544,7 @@ func (b *Bootstrap) BootstrapHandler(ctx context.Context, _ *sync.WaitGroup, _ s
 		existing, err := cert.AlreadyInStore()
 		if err != nil {
 			lc.Error(err.Error())
-			os.Exit(1)
+			return false
 		}
 
 		if existing {
@@ -447,7 +556,7 @@ func (b *Bootstrap) BootstrapHandler(ctx context.Context, _ *sync.WaitGroup, _ s
 		cp, err := cert.ReadFrom(secretStoreConfig.CertFilePath, secretStoreConfig.KeyFilePath)
 		if err != nil {
 			lc.Error("failed to get certificate pair from volume")
-			os.Exit(1)
+			return false
 		}
 
 		lc.Info("proxy certificate pair are loaded from volume successfully, will upload to secret store")
@@ -456,7 +565,7 @@ func (b *Bootstrap) BootstrapHandler(ctx context.Context, _ *sync.WaitGroup, _ s
 		if err != nil {
 			lc.Error("failed to upload the proxy cert pair into the secret store")
 			lc.Error(err.Error())
-			os.Exit(1)
+			return false
 		}
 
 		lc.Info("proxy certificate pair are uploaded to secret store successfully")
@@ -471,7 +580,7 @@ func (b *Bootstrap) BootstrapHandler(ctx context.Context, _ *sync.WaitGroup, _ s
 	if err := secretsengine.New(secretsengine.ConsulSecretEngineMountPoint, secretsengine.Consul).
 		Enable(&rootToken, lc, client); err != nil {
 		lc.Errorf("failed to enable Consul secrets engine: %s", err.Error())
-		os.Exit(1)
+		return false
 	}
 
 	// generate a management token for Consul secrets engine operations:
@@ -479,41 +588,11 @@ func (b *Bootstrap) BootstrapHandler(ctx context.Context, _ *sync.WaitGroup, _ s
 	if _, err := tokenFileWriter.CreateAndWrite(rootToken, configuration.SecretStore.ConsulSecretsAdminTokenPath,
 		tokenFileWriter.CreateMgmtTokenForConsulSecretsEngine); err != nil {
 		lc.Errorf("failed to create and write the token for Consul secret management: %s", err.Error())
-		os.Exit(1)
-	}
-
-	// Configure Kong Admin API
-	//
-	// For context - this process doesn't actually talk to Kong, it creates the configuration
-	// file and JWT necessary in order for the Kong process to bootstrap itself with a properly
-	// locked down Admin API and enable security-proxy-setup with the JWT in order to setup
-	// the services/routes as configured.
-	//
-	// The reason why this code exists in the Secret Store setup is a matter of timing and
-	// file permissions. This process has to occur before Kong is started, and cannot be executed
-	// by the Kong entrypoint script because that executes as the Kong user. The JWT created
-	// needs to be used by the security-proxy-setup process, so needs to be created before.
-	// Since Secret Store setup runs prior to both of these, it made sense to logically drop them
-	// here, especially if we're going to incorporate ties in to the Secret Store at a later
-	// time.
-	//
-	// As of now, the private key that is generated for the "admin" group in Kong never
-	// gets saved to disk out of memory. This could change in the future and be placed into
-	// the Secret Store if we need to regenerate the JWT on the fly after setup has occurred.
-	//
-	lc.Info("Starting the Kong Admin API config file creation")
-
-	// Get an instance of KongAdminAPI and map the paths from configuration.toml
-	ka := NewKongAdminAPI(kongAdminConfig)
-
-	// Setup Kong Admin API loopback configuration
-	err = ka.Setup()
-	if err != nil {
-		lc.Errorf("failed to configure the Kong Admin API: %s", err.Error())
+		return false
 	}
 
 	lc.Info("Vault init done successfully")
-	return false
+	return true
 
 }
 
@@ -535,7 +614,7 @@ func (b *Bootstrap) getKnownSecretsToAdd() (map[string][]string, error) {
 		secretItems := strings.Split(secretSpec, serviceListBegin)
 		if len(secretItems) != 2 {
 			return nil, fmt.Errorf(
-				"invalid specification for %s environment vaiable: Format of value '%s' is invalid. Missing or too many '%s'",
+				"invalid specification for %s environment variable: Format of value '%s' is invalid. Missing or too many '%s'",
 				addKnownSecretsEnv,
 				secretSpec,
 				serviceListBegin)
@@ -546,7 +625,7 @@ func (b *Bootstrap) getKnownSecretsToAdd() (map[string][]string, error) {
 		_, valid := b.validKnownSecrets[secretName]
 		if !valid {
 			return nil, fmt.Errorf(
-				"invalid specification for %s environment vaiable: '%s' is not a known secret",
+				"invalid specification for %s environment variable: '%s' is not a known secret",
 				addKnownSecretsEnv,
 				secretName)
 		}
@@ -554,7 +633,7 @@ func (b *Bootstrap) getKnownSecretsToAdd() (map[string][]string, error) {
 		serviceNameList := secretItems[1]
 		if !strings.Contains(serviceNameList, serviceListEnd) {
 			return nil, fmt.Errorf(
-				"invalid specification for %s environment vaiable: Service list for '%s' missing closing '%s'",
+				"invalid specification for %s environment variable: Service list for '%s' missing closing '%s'",
 				addKnownSecretsEnv,
 				secretName,
 				serviceListEnd)
@@ -563,7 +642,7 @@ func (b *Bootstrap) getKnownSecretsToAdd() (map[string][]string, error) {
 		serviceNameList = strings.TrimSpace(strings.Replace(serviceNameList, serviceListEnd, "", 1))
 		if len(serviceNameList) == 0 {
 			return nil, fmt.Errorf(
-				"invalid specification for %s environment vaiable: Service name list for '%s' is empty.",
+				"invalid specification for %s environment variable: Service name list for '%s' is empty.",
 				addKnownSecretsEnv,
 				secretName)
 		}
@@ -574,7 +653,7 @@ func (b *Bootstrap) getKnownSecretsToAdd() (map[string][]string, error) {
 
 			if !serviceNameRegx.MatchString(serviceNames[index]) {
 				return nil, fmt.Errorf(
-					"invalid specification for %s environment vaiable: Service name '%s' has invalid characters.",
+					"invalid specification for %s environment variable: Service name '%s' has invalid characters.",
 					addKnownSecretsEnv, serviceNames[index])
 			}
 		}
@@ -591,14 +670,14 @@ func (b *Bootstrap) getKnownSecretsToAdd() (map[string][]string, error) {
 // XXX Collapse addServiceCredential and addDBCredential together by passing in the path or using
 // variadic functions
 
-func addServiceCredential(lc logger.LoggingClient, db string, cred Cred, service string, pair UserPasswordPair) error {
-	path := fmt.Sprintf("%s/%s/%s", secretBasePath, service, db)
-	existing, err := cred.AlreadyInStore(path)
+func addServiceCredential(lc logger.LoggingClient, secretKeyName string, secretStore Cred, service string, pair UserPasswordPair) error {
+	path := fmt.Sprintf("%s/%s/%s", secretBasePath, service, secretKeyName)
+	existing, err := secretStore.AlreadyInStore(path)
 	if err != nil {
 		return err
 	}
 	if !existing {
-		err = cred.UploadToStore(&pair, path)
+		err = secretStore.UploadToStore(&pair, path)
 		if err != nil {
 			lc.Errorf("failed to upload credential pair for %s on path %s", service, path)
 			return err
@@ -610,8 +689,8 @@ func addServiceCredential(lc logger.LoggingClient, db string, cred Cred, service
 	return err
 }
 
-func getDBCredential(db string, cred Cred, service string) (UserPasswordPair, error) {
-	path := fmt.Sprintf("%s/%s/%s", secretBasePath, db, service)
+func getCredential(credBootstrapStem string, cred Cred, service string) (UserPasswordPair, error) {
+	path := fmt.Sprintf("%s/%s/%s", secretBasePath, credBootstrapStem, service)
 
 	pair, err := cred.getUserPasswordPair(path)
 	if err != nil {
@@ -621,8 +700,9 @@ func getDBCredential(db string, cred Cred, service string) (UserPasswordPair, er
 	return *pair, err
 
 }
-func addDBCredential(lc logger.LoggingClient, db string, cred Cred, service string, pair UserPasswordPair) error {
-	path := fmt.Sprintf("%s/%s/%s", secretBasePath, db, service)
+
+func storeCredential(lc logger.LoggingClient, credBootstrapStem string, cred Cred, secretKeyName string, pair UserPasswordPair) error {
+	path := fmt.Sprintf("%s/%s/%s", secretBasePath, credBootstrapStem, secretKeyName)
 	existing, err := cred.AlreadyInStore(path)
 	if err != nil {
 		lc.Error(err.Error())
@@ -631,17 +711,17 @@ func addDBCredential(lc logger.LoggingClient, db string, cred Cred, service stri
 	if !existing {
 		err = cred.UploadToStore(&pair, path)
 		if err != nil {
-			lc.Errorf("failed to upload credential pair for db %s on path %s", service, path)
+			lc.Errorf("failed to upload credential pair for %s on path %s", secretKeyName, path)
 			return err
 		}
 	} else {
-		lc.Infof("credentials for %s already present at path %s", service, path)
+		lc.Infof("credentials for %s already present at path %s", secretKeyName, path)
 	}
 
 	return err
 }
 
-func loadInitResponse(
+func LoadInitResponse(
 	lc logger.LoggingClient,
 	fileOpener fileioperformer.FileIoPerformer,
 	secretConfig config.SecretStoreInfo,

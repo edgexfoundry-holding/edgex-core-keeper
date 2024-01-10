@@ -26,9 +26,9 @@ import (
 	"github.com/edgexfoundry/edgex-go/internal/security/bootstrapper/container"
 	"github.com/edgexfoundry/edgex-go/internal/security/bootstrapper/interfaces"
 
-	bootstrapContainer "github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/container"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/startup"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/di"
+	bootstrapContainer "github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/container"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/startup"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/di"
 )
 
 // Bootstrap is to implement BootstrapHandler
@@ -47,14 +47,14 @@ func (b *Bootstrap) BootstrapHandler(ctx context.Context, wg *sync.WaitGroup, _ 
 	conf := container.ConfigurationFrom(dic.Get)
 	lc := bootstrapContainer.LoggingClientFrom(dic.Get)
 
-	lc.Debugf("configuration from the local TOML: %v", *conf)
+	lc.Debugf("configuration from the local file: %v", *conf)
 
 	var command interfaces.Command
 	var err error
 
-	var confdir string
+	var configDir string
 	flagSet := flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
-	flagSet.StringVar(&confdir, "confdir", "", "") // handled by bootstrap; duplicated here to prevent arg parsing errors
+	flagSet.StringVar(&configDir, "configDir", "", "") // handled by bootstrap; duplicated here to prevent arg parsing errors
 	err = flagSet.Parse(os.Args[1:])
 	if err != nil {
 		lc.Error(err.Error())

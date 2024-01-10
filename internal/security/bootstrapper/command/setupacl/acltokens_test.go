@@ -23,7 +23,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/clients/logger"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/clients/logger"
+	"github.com/edgexfoundry/go-mod-secrets/v3/pkg/types"
 )
 
 func TestIsACLTokenPersistent(t *testing.T) {
@@ -81,9 +82,9 @@ func TestCreateAgentToken(t *testing.T) {
 	ctx := context.Background()
 	wg := &sync.WaitGroup{}
 	lc := logger.MockLogger{}
-	testBootstrapToken := BootStrapACLTokenInfo{
+	testBootstrapToken := types.BootStrapACLTokenInfo{
 		SecretID: "test-bootstrap-token",
-		Policies: []Policy{
+		Policies: []types.Policy{
 			{
 				ID:   "00000000-0000-0000-0000-000000000001",
 				Name: "global-management",
@@ -93,20 +94,18 @@ func TestCreateAgentToken(t *testing.T) {
 
 	tests := []struct {
 		name                        string
-		bootstrapToken              BootStrapACLTokenInfo
+		bootstrapToken              types.BootStrapACLTokenInfo
 		listTokensOkResponse        bool
 		listTokensRetriesOkResponse bool
 		createTokenOkResponse       bool
-		readTokenOkResponse         bool
 		policyAlreadyExists         bool
 		expectedErr                 bool
 	}{
-		{"Good:agent token ok response 1st time", testBootstrapToken, true, true, true, true, false, false},
-		{"Good:agent token ok response 2nd time or later", testBootstrapToken, true, true, true, true, true, false},
-		{"Bad:list tokens bad response", testBootstrapToken, false, false, true, true, false, true},
-		{"Bad:create token bad response", testBootstrapToken, true, true, false, true, false, true},
-		{"Bad:read token bad response", testBootstrapToken, true, true, true, false, false, true},
-		{"Bad:empty bootstrap token", BootStrapACLTokenInfo{}, false, false, false, true, false, true},
+		{"Good:agent token ok response 1st time", testBootstrapToken, true, true, true, false, false},
+		{"Good:agent token ok response 2nd time or later", testBootstrapToken, true, true, true, true, false},
+		{"Bad:list tokens bad response", testBootstrapToken, false, false, true, false, true},
+		{"Bad:create token bad response", testBootstrapToken, true, true, false, false, true},
+		{"Bad:empty bootstrap token", types.BootStrapACLTokenInfo{}, false, false, false, false, true},
 	}
 
 	for _, tt := range tests {
@@ -117,7 +116,6 @@ func TestCreateAgentToken(t *testing.T) {
 			responseOpts := serverOptions{
 				listTokensOk:        test.listTokensOkResponse,
 				createTokenOk:       test.createTokenOkResponse,
-				readTokenOk:         test.readTokenOkResponse,
 				policyAlreadyExists: test.policyAlreadyExists,
 				readPolicyByNameOk:  true,
 				createNewPolicyOk:   true,
@@ -136,8 +134,7 @@ func TestCreateAgentToken(t *testing.T) {
 			// first time we don't have the agent token yet
 			agentToken1, err := setupRegistryACL.createAgentToken(test.bootstrapToken)
 
-			// readToken only being executed only on the second time, so the first time should not expected an error
-			if test.expectedErr && test.readTokenOkResponse {
+			if test.expectedErr {
 				require.Error(t, err)
 			} else {
 				require.NoError(t, err)
@@ -161,9 +158,9 @@ func TestSetAgentTokenToAgent(t *testing.T) {
 	ctx := context.Background()
 	wg := &sync.WaitGroup{}
 	lc := logger.MockLogger{}
-	testBootstrapToken := BootStrapACLTokenInfo{
+	testBootstrapToken := types.BootStrapACLTokenInfo{
 		SecretID: "test-bootstrap-token",
-		Policies: []Policy{
+		Policies: []types.Policy{
 			{
 				ID:   "00000000-0000-0000-0000-000000000001",
 				Name: "global-management",
@@ -174,14 +171,14 @@ func TestSetAgentTokenToAgent(t *testing.T) {
 
 	tests := []struct {
 		name                    string
-		bootstrapToken          BootStrapACLTokenInfo
+		bootstrapToken          types.BootStrapACLTokenInfo
 		agentToken              string
 		setAgentTokenOkResponse bool
 		expectedErr             bool
 	}{
 		{"Good:set agent token ok response", testBootstrapToken, testAgentToken, true, false},
 		{"Bad:set agent token bad response", testBootstrapToken, testAgentToken, false, true},
-		{"Bad:empty bootstrap token", BootStrapACLTokenInfo{}, testAgentToken, false, true},
+		{"Bad:empty bootstrap token", types.BootStrapACLTokenInfo{}, testAgentToken, false, true},
 		{"Bad:empty agent token", testBootstrapToken, "", false, true},
 	}
 

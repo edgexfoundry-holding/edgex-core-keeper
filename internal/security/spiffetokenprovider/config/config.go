@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright 2022 Intel Corporation
+ * Copyright 2022-2023 Intel Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
@@ -16,7 +16,8 @@
 package config
 
 import (
-	bootstrapConfig "github.com/edgexfoundry/go-mod-bootstrap/v2/config"
+	fileProviderConfig "github.com/edgexfoundry/edgex-go/internal/security/fileprovider/config"
+	bootstrapConfig "github.com/edgexfoundry/go-mod-bootstrap/v3/config"
 )
 
 // SpiffeInfo contains information for Spiffe configuration
@@ -28,14 +29,13 @@ type SpiffeInfo struct {
 }
 
 type ConfigurationStruct struct {
-	Writable     WritableInfo
-	MessageQueue bootstrapConfig.MessageBusInfo
-	Clients      map[string]bootstrapConfig.ClientInfo
-	Databases    map[string]bootstrapConfig.Database
-	Registry     bootstrapConfig.RegistryInfo
-	Service      bootstrapConfig.ServiceInfo
-	SecretStore  bootstrapConfig.SecretStoreInfo
-	Spiffe       SpiffeInfo
+	Writable    WritableInfo
+	MessageBus  bootstrapConfig.MessageBusInfo
+	Database    bootstrapConfig.Database
+	Registry    bootstrapConfig.RegistryInfo
+	Service     bootstrapConfig.ServiceInfo
+	TokenConfig fileProviderConfig.TokenFileProviderInfo
+	Spiffe      SpiffeInfo
 }
 
 type WritableInfo struct {
@@ -49,10 +49,6 @@ type WritableInfo struct {
 func (c *ConfigurationStruct) UpdateFromRaw(rawConfig interface{}) bool {
 	configuration, ok := rawConfig.(*ConfigurationStruct)
 	if ok {
-		// Check that information was successfully read from Registry
-		if configuration.Service.Port == 0 {
-			return false
-		}
 		*c = *configuration
 	}
 	return ok
@@ -62,6 +58,11 @@ func (c *ConfigurationStruct) UpdateFromRaw(rawConfig interface{}) bool {
 // provide the appropriate structure to registry.Client's WatchForChanges().
 func (c *ConfigurationStruct) EmptyWritablePtr() interface{} {
 	return &WritableInfo{}
+}
+
+// GetWritablePtr returns pointer to the writable section
+func (c *ConfigurationStruct) GetWritablePtr() any {
+	return &c.Writable
 }
 
 // UpdateWritableFromRaw converts configuration received from the registry to a service-specific WritableInfo struct
@@ -75,16 +76,14 @@ func (c *ConfigurationStruct) UpdateWritableFromRaw(rawWritable interface{}) boo
 }
 
 // GetBootstrap returns the configuration elements required by the bootstrap.  Currently, a copy of the configuration
-// data is returned.  This is intended to be temporary -- since ConfigurationStruct drives the configuration.toml's
-// structure -- until we can make backwards-breaking configuration.toml changes (which would consolidate these fields
+// data is returned.  This is intended to be temporary -- since ConfigurationStruct drives the configuration.yaml's
+// structure -- until we can make backwards-breaking configuration.yaml changes (which would consolidate these fields
 // into an bootstrapConfig.BootstrapConfiguration struct contained within ConfigurationStruct).
 func (c *ConfigurationStruct) GetBootstrap() bootstrapConfig.BootstrapConfiguration {
-	// temporary until we can make backwards-breaking configuration.toml change
+	// temporary until we can make backwards-breaking configuration.yaml change
 	return bootstrapConfig.BootstrapConfiguration{
-		Clients:     c.Clients,
-		Service:     c.Service,
-		Registry:    c.Registry,
-		SecretStore: c.SecretStore,
+		Service:  &c.Service,
+		Registry: &c.Registry,
 	}
 }
 
@@ -98,9 +97,9 @@ func (c *ConfigurationStruct) GetRegistryInfo() bootstrapConfig.RegistryInfo {
 	return c.Registry
 }
 
-// GetDatabaseInfo returns a database information map.
-func (c *ConfigurationStruct) GetDatabaseInfo() map[string]bootstrapConfig.Database {
-	return c.Databases
+// GetDatabaseInfo returns a database information.
+func (c *ConfigurationStruct) GetDatabaseInfo() bootstrapConfig.Database {
+	return c.Database
 }
 
 // GetInsecureSecrets returns the service's InsecureSecrets.

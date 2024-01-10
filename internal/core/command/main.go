@@ -1,5 +1,7 @@
 /*******************************************************************************
  * Copyright 2020 Dell Inc.
+ * Copyright 2022-2023 IOTech Ltd.
+ * Copyright 2023 Intel Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
@@ -17,29 +19,32 @@ package command
 import (
 	"context"
 	"os"
+	"sync"
+	"time"
+
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap"
+	bootstrapContainer "github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/container"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/flags"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/handlers"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/interfaces"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/startup"
+	bootstrapConfig "github.com/edgexfoundry/go-mod-bootstrap/v3/config"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/di"
 
 	"github.com/edgexfoundry/edgex-go"
-	"github.com/edgexfoundry/edgex-go/internal"
 	"github.com/edgexfoundry/edgex-go/internal/core/command/config"
 	"github.com/edgexfoundry/edgex-go/internal/core/command/container"
-	"github.com/edgexfoundry/edgex-go/internal/pkg/telemetry"
+	"github.com/edgexfoundry/edgex-go/internal/core/command/controller/messaging"
 
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/flags"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/handlers"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/interfaces"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/startup"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/di"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/common"
 
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/common"
-
-	"github.com/gorilla/mux"
+	"github.com/labstack/echo/v4"
 )
 
-func Main(ctx context.Context, cancel context.CancelFunc, router *mux.Router) {
+func Main(ctx context.Context, cancel context.CancelFunc, router *echo.Echo) {
 	startupTimer := startup.NewStartUpTimer(common.CoreCommandServiceKey)
 
-	// All common command-line flags have been moved to DefaultCommonFlags. Service specific flags can be add here,
+	// All common command-line flags have been moved to DefaultCommonFlags. Service specific flags can be added here,
 	// by inserting service specific flag prior to call to commonFlags.Parse().
 	// Example:
 	// 		flags.FlagSet.StringVar(&myvar, "m", "", "Specify a ....")
@@ -63,18 +68,58 @@ func Main(ctx context.Context, cancel context.CancelFunc, router *mux.Router) {
 		cancel,
 		f,
 		common.CoreCommandServiceKey,
-		internal.ConfigStemCore,
+		common.ConfigStemCore,
 		configuration,
 		startupTimer,
 		dic,
 		true,
+		bootstrapConfig.ServiceTypeOther,
 		[]interfaces.BootstrapHandler{
 			handlers.NewClientsBootstrap().BootstrapHandler,
+			MessagingBootstrapHandler,
+			handlers.NewServiceMetrics(common.CoreCommandServiceKey).BootstrapHandler, // Must be after Messaging
 			NewBootstrap(router, common.CoreCommandServiceKey).BootstrapHandler,
-			telemetry.BootstrapHandler,
 			httpServer.BootstrapHandler,
 			handlers.NewStartMessage(common.CoreCommandServiceKey, edgex.Version).BootstrapHandler,
 		})
 
 	// code here!
+}
+
+// MessagingBootstrapHandler sets up the MessageBus and External MQTT connections as well as subscriptions
+func MessagingBootstrapHandler(ctx context.Context, wg *sync.WaitGroup, startupTimer startup.Timer, dic *di.Container) bool {
+	lc := bootstrapContainer.LoggingClientFrom(dic.Get)
+	configuration := container.ConfigurationFrom(dic.Get)
+
+	if len(configuration.Service.RequestTimeout) == 0 {
+		lc.Error("Service.RequestTimeout found empty in service's configuration, missing common config? Use -cp or -cc flags for common config")
+		return false
+	}
+
+	requestTimeout, err := time.ParseDuration(configuration.Service.RequestTimeout)
+	if err != nil {
+		lc.Errorf("Failed to parse Service.RequestTimeout configuration value: %v", err)
+		return false
+	}
+
+	if configuration.ExternalMQTT.Enabled {
+		if !handlers.NewExternalMQTT(messaging.OnConnectHandler(requestTimeout, dic)).BootstrapHandler(ctx, wg, startupTimer, dic) {
+			return false
+		}
+	}
+
+	if !handlers.MessagingBootstrapHandler(ctx, wg, startupTimer, dic) {
+		return false
+	}
+	if err := messaging.SubscribeCommandRequests(ctx, requestTimeout, dic); err != nil {
+		lc.Errorf("Failed to subscribe commands request from internal message bus, %v", err)
+		return false
+	}
+
+	if err := messaging.SubscribeCommandQueryRequests(ctx, dic); err != nil {
+		lc.Errorf("Failed to subscribe command query request from internal message bus, %v", err)
+		return false
+	}
+
+	return true
 }

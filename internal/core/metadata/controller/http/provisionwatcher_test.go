@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2021 IOTech Ltd
+// Copyright (C) 2021-2023 IOTech Ltd
 //
 // SPDX-License-Identifier: Apache-2.0
 
@@ -13,17 +13,17 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/di"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/common"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/dtos"
-	commonDTO "github.com/edgexfoundry/go-mod-core-contracts/v2/dtos/common"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/dtos/requests"
-	responseDTO "github.com/edgexfoundry/go-mod-core-contracts/v2/dtos/responses"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/errors"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/models"
-	"github.com/gorilla/mux"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/di"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/common"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/dtos"
+	commonDTO "github.com/edgexfoundry/go-mod-core-contracts/v3/dtos/common"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/dtos/requests"
+	responseDTO "github.com/edgexfoundry/go-mod-core-contracts/v3/dtos/responses"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/errors"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/models"
+
+	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/edgexfoundry/edgex-go/internal/core/metadata/container"
@@ -52,13 +52,17 @@ func buildTestAddProvisionWatcherRequest() requests.AddProvisionWatcherRequest {
 		ProvisionWatcher: dtos.ProvisionWatcher{
 			Id:                  ExampleUUID,
 			Name:                testProvisionWatcherName,
+			ServiceName:         TestDeviceServiceName,
 			Labels:              testProvisionWatcherLabels,
 			Identifiers:         testProvisionWatcherIdentifiers,
 			BlockingIdentifiers: testProvisionWatcherBlockingIdentifiers,
-			ProfileName:         TestDeviceProfileName,
-			ServiceName:         TestDeviceServiceName,
 			AdminState:          models.Unlocked,
-			AutoEvents:          testProvisionWatcherAutoEvents,
+			DiscoveredDevice: dtos.DiscoveredDevice{
+				ProfileName: TestDeviceProfileName,
+				AdminState:  models.Unlocked,
+				AutoEvents:  testProvisionWatcherAutoEvents,
+				Properties:  testProperties,
+			},
 		},
 	}
 }
@@ -78,13 +82,17 @@ func buildTestUpdateProvisionWatcherRequest() requests.UpdateProvisionWatcherReq
 		ProvisionWatcher: dtos.UpdateProvisionWatcher{
 			Id:                  &testUUID,
 			Name:                &testName,
+			ServiceName:         &testServiceName,
 			Labels:              testProvisionWatcherLabels,
 			Identifiers:         testProvisionWatcherIdentifiers,
 			BlockingIdentifiers: testProvisionWatcherBlockingIdentifiers,
-			ServiceName:         &testServiceName,
-			ProfileName:         &testProfileName,
 			AdminState:          &testAdminState,
-			AutoEvents:          testProvisionWatcherAutoEvents,
+			DiscoveredDevice: dtos.UpdateDiscoveredDevice{
+				ProfileName: &testProfileName,
+				AdminState:  &testAdminState,
+				AutoEvents:  testProvisionWatcherAutoEvents,
+				Properties:  testProperties,
+			},
 		},
 	}
 
@@ -101,7 +109,7 @@ func TestProvisionWatcherController_AddProvisionWatcher_Created(t *testing.T) {
 	dbClientMock.On("AddProvisionWatcher", pwModel).Return(pwModel, nil)
 	dbClientMock.On("DeviceServiceByName", pwModel.ServiceName).Return(models.DeviceService{}, nil)
 	dbClientMock.On("DeviceServiceNameExists", pwModel.ServiceName).Return(true, nil)
-	dbClientMock.On("DeviceProfileNameExists", pwModel.ProfileName).Return(true, nil)
+	dbClientMock.On("DeviceProfileNameExists", pwModel.DiscoveredDevice.ProfileName).Return(true, nil)
 	dic.Update(di.ServiceConstructorMap{
 		container.DBClientInterfaceName: func(get di.Get) interface{} {
 			return dbClientMock
@@ -123,6 +131,7 @@ func TestProvisionWatcherController_AddProvisionWatcher_Created(t *testing.T) {
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
+			e := echo.New()
 			jsonData, err := json.Marshal(testCase.Request)
 			require.NoError(t, err)
 
@@ -132,8 +141,10 @@ func TestProvisionWatcherController_AddProvisionWatcher_Created(t *testing.T) {
 
 			// Act
 			recorder := httptest.NewRecorder()
-			handler := http.HandlerFunc(controller.AddProvisionWatcher)
-			handler.ServeHTTP(recorder, req)
+			c := e.NewContext(req, recorder)
+			err = controller.AddProvisionWatcher(c)
+			require.NoError(t, err)
+
 			var res []commonDTO.BaseWithIdResponse
 			err = json.Unmarshal(recorder.Body.Bytes(), &res)
 
@@ -166,9 +177,19 @@ func TestProvisionWatcherController_AddProvisionWatcher_BadRequest(t *testing.T)
 	dbClientMock.On("DeviceServiceNameExists", notFoundService.ProvisionWatcher.ServiceName).Return(false, nil)
 	notFountProfileName := "notFoundProfile"
 	notFoundProfile := provisionWatcher
-	notFoundProfile.ProvisionWatcher.ProfileName = notFountProfileName
-	dbClientMock.On("DeviceServiceNameExists", notFoundProfile.ProvisionWatcher.ServiceName).Return(true, nil)
-	dbClientMock.On("DeviceProfileNameExists", notFoundProfile.ProvisionWatcher.ProfileName).Return(false, nil)
+	notFoundProfile.ProvisionWatcher.DiscoveredDevice.ProfileName = notFountProfileName
+	notFoundServiceProvisionWatcherModel := requests.AddProvisionWatcherReqToProvisionWatcherModels(
+		[]requests.AddProvisionWatcherRequest{notFoundService})[0]
+	dbClientMock.On("AddProvisionWatcher", notFoundServiceProvisionWatcherModel).Return(
+		notFoundServiceProvisionWatcherModel,
+		errors.NewCommonEdgeX(errors.KindEntityDoesNotExist, fmt.Sprintf("device service '%s' does not exists",
+			notFountServiceName), nil))
+	notFoundProfileProvisionWatcherModel := requests.AddProvisionWatcherReqToProvisionWatcherModels(
+		[]requests.AddProvisionWatcherRequest{notFoundProfile})[0]
+	dbClientMock.On("AddProvisionWatcher", notFoundProfileProvisionWatcherModel).Return(
+		notFoundProfileProvisionWatcherModel,
+		errors.NewCommonEdgeX(errors.KindEntityDoesNotExist, fmt.Sprintf("device profile '%s' does not exists",
+			notFountProfileName), nil))
 
 	dic.Update(di.ServiceConstructorMap{
 		container.DBClientInterfaceName: func(get di.Get) interface{} {
@@ -191,6 +212,7 @@ func TestProvisionWatcherController_AddProvisionWatcher_BadRequest(t *testing.T)
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
+			e := echo.New()
 			jsonData, err := json.Marshal(testCase.Request)
 			require.NoError(t, err)
 
@@ -200,8 +222,9 @@ func TestProvisionWatcherController_AddProvisionWatcher_BadRequest(t *testing.T)
 
 			// Act
 			recorder := httptest.NewRecorder()
-			handler := http.HandlerFunc(controller.AddProvisionWatcher)
-			handler.ServeHTTP(recorder, req)
+			c := e.NewContext(req, recorder)
+			err = controller.AddProvisionWatcher(c)
+			require.NoError(t, err)
 
 			// Assert
 			if testCase.expectedStatusCode == http.StatusMultiStatus {
@@ -237,7 +260,7 @@ func TestProvisionWatcherController_AddProvisionWatcher_Duplicated(t *testing.T)
 	dbClientMock.On("AddProvisionWatcher", duplicateNameModel).Return(duplicateNameModel, duplicateNameDBError)
 	dbClientMock.On("AddProvisionWatcher", duplicateIdModel).Return(duplicateIdModel, duplicateIdDBError)
 	dbClientMock.On("DeviceServiceNameExists", duplicateIdRequest.ProvisionWatcher.ServiceName).Return(true, nil)
-	dbClientMock.On("DeviceProfileNameExists", duplicateIdRequest.ProvisionWatcher.ProfileName).Return(true, nil)
+	dbClientMock.On("DeviceProfileNameExists", duplicateIdRequest.ProvisionWatcher.DiscoveredDevice.ProfileName).Return(true, nil)
 	dic.Update(di.ServiceConstructorMap{
 		container.DBClientInterfaceName: func(get di.Get) interface{} {
 			return dbClientMock
@@ -257,6 +280,7 @@ func TestProvisionWatcherController_AddProvisionWatcher_Duplicated(t *testing.T)
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
+			e := echo.New()
 			jsonData, err := json.Marshal(testCase.request)
 			require.NoError(t, err)
 
@@ -266,8 +290,9 @@ func TestProvisionWatcherController_AddProvisionWatcher_Duplicated(t *testing.T)
 
 			// Act
 			recorder := httptest.NewRecorder()
-			handler := http.HandlerFunc(controller.AddProvisionWatcher)
-			handler.ServeHTTP(recorder, req)
+			c := e.NewContext(req, recorder)
+			err = controller.AddProvisionWatcher(c)
+			require.NoError(t, err)
 			var res []commonDTO.BaseWithIdResponse
 			err = json.Unmarshal(recorder.Body.Bytes(), &res)
 			require.NoError(t, err)
@@ -314,15 +339,18 @@ func TestProvisionWatcherController_ProvisionWatcherByName(t *testing.T) {
 
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
-			reqPath := fmt.Sprintf("%s/%s", common.ApiProvisionWatcherByNameRoute, testCase.provisionWatcherName)
+			e := echo.New()
+			reqPath := fmt.Sprintf("%s/%s", common.ApiProvisionWatcherByNameEchoRoute, testCase.provisionWatcherName)
 			req, err := http.NewRequest(http.MethodGet, reqPath, http.NoBody)
-			req = mux.SetURLVars(req, map[string]string{common.Name: testCase.provisionWatcherName})
 			require.NoError(t, err)
 
 			// Act
 			recorder := httptest.NewRecorder()
-			handler := http.HandlerFunc(controller.ProvisionWatcherByName)
-			handler.ServeHTTP(recorder, req)
+			c := e.NewContext(req, recorder)
+			c.SetParamNames(common.Name)
+			c.SetParamValues(testCase.provisionWatcherName)
+			err = controller.ProvisionWatcherByName(c)
+			require.NoError(t, err)
 
 			// Assert
 			if testCase.errorExpected {
@@ -392,18 +420,21 @@ func TestProvisionWatcherController_ProvisionWatchersByServiceName(t *testing.T)
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
-			req, err := http.NewRequest(http.MethodGet, common.ApiProvisionWatcherByServiceNameRoute, http.NoBody)
+			e := echo.New()
+			req, err := http.NewRequest(http.MethodGet, common.ApiProvisionWatcherByServiceNameEchoRoute, http.NoBody)
 			query := req.URL.Query()
 			query.Add(common.Offset, testCase.offset)
 			query.Add(common.Limit, testCase.limit)
 			req.URL.RawQuery = query.Encode()
-			req = mux.SetURLVars(req, map[string]string{common.Name: testCase.serviceName})
 			require.NoError(t, err)
 
 			// Act
 			recorder := httptest.NewRecorder()
-			handler := http.HandlerFunc(controller.ProvisionWatchersByServiceName)
-			handler.ServeHTTP(recorder, req)
+			c := e.NewContext(req, recorder)
+			c.SetParamNames(common.Name)
+			c.SetParamValues(testCase.serviceName)
+			err = controller.ProvisionWatchersByServiceName(c)
+			require.NoError(t, err)
 
 			// Assert
 			if testCase.errorExpected {
@@ -434,11 +465,11 @@ func TestProvisionWatcherController_ProvisionWatchersByProfileName(t *testing.T)
 	testProfileA := "testProfileA"
 	testProfileB := "testProfileB"
 	pw1WithProfileA := provisionWatcher
-	pw1WithProfileA.ProfileName = testProfileA
+	pw1WithProfileA.DiscoveredDevice.ProfileName = testProfileA
 	pw2WithProfileA := provisionWatcher
-	pw2WithProfileA.ProfileName = testProfileA
+	pw2WithProfileA.DiscoveredDevice.ProfileName = testProfileA
 	pw3WithProfileB := provisionWatcher
-	pw3WithProfileB.ProfileName = testProfileB
+	pw3WithProfileB.DiscoveredDevice.ProfileName = testProfileB
 
 	provisionWatchers := []models.ProvisionWatcher{pw1WithProfileA, pw2WithProfileA, pw3WithProfileB}
 	expectedTotalPWCountProfileA := uint32(2)
@@ -475,18 +506,21 @@ func TestProvisionWatcherController_ProvisionWatchersByProfileName(t *testing.T)
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
-			req, err := http.NewRequest(http.MethodGet, common.ApiProvisionWatcherByProfileNameRoute, http.NoBody)
+			e := echo.New()
+			req, err := http.NewRequest(http.MethodGet, common.ApiProvisionWatcherByProfileNameEchoRoute, http.NoBody)
 			query := req.URL.Query()
 			query.Add(common.Offset, testCase.offset)
 			query.Add(common.Limit, testCase.limit)
 			req.URL.RawQuery = query.Encode()
-			req = mux.SetURLVars(req, map[string]string{common.Name: testCase.profileName})
 			require.NoError(t, err)
 
 			// Act
 			recorder := httptest.NewRecorder()
-			handler := http.HandlerFunc(controller.ProvisionWatchersByProfileName)
-			handler.ServeHTTP(recorder, req)
+			c := e.NewContext(req, recorder)
+			c.SetParamNames(common.Name)
+			c.SetParamValues(testCase.profileName)
+			err = controller.ProvisionWatchersByProfileName(c)
+			require.NoError(t, err)
 
 			// Assert
 			if testCase.errorExpected {
@@ -550,6 +584,7 @@ func TestProvisionWatcherController_AllProvisionWatchers(t *testing.T) {
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
+			e := echo.New()
 			req, err := http.NewRequest(http.MethodGet, common.ApiAllProvisionWatcherRoute, http.NoBody)
 			query := req.URL.Query()
 			query.Add(common.Offset, testCase.offset)
@@ -562,8 +597,9 @@ func TestProvisionWatcherController_AllProvisionWatchers(t *testing.T) {
 
 			// Act
 			recorder := httptest.NewRecorder()
-			handler := http.HandlerFunc(controller.AllProvisionWatchers)
-			handler.ServeHTTP(recorder, req)
+			c := e.NewContext(req, recorder)
+			err = controller.AllProvisionWatchers(c)
+			require.NoError(t, err)
 
 			// Assert
 			if testCase.errorExpected {
@@ -620,15 +656,19 @@ func TestProvisionWatcherController_DeleteProvisionWatcherByName(t *testing.T) {
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
-			reqPath := fmt.Sprintf("%s/%s", common.ApiProvisionWatcherByNameRoute, testCase.provisionWatcherName)
+			e := echo.New()
+			reqPath := fmt.Sprintf("%s/%s", common.ApiProvisionWatcherByNameEchoRoute, testCase.provisionWatcherName)
 			req, err := http.NewRequest(http.MethodGet, reqPath, http.NoBody)
-			req = mux.SetURLVars(req, map[string]string{common.Name: testCase.provisionWatcherName})
 			require.NoError(t, err)
 
 			// Act
 			recorder := httptest.NewRecorder()
-			handler := http.HandlerFunc(controller.DeleteProvisionWatcherByName)
-			handler.ServeHTTP(recorder, req)
+			c := e.NewContext(req, recorder)
+			c.SetParamNames(common.Name)
+			c.SetParamValues(testCase.provisionWatcherName)
+			err = controller.DeleteProvisionWatcherByName(c)
+			require.NoError(t, err)
+
 			var res commonDTO.BaseResponse
 			err = json.Unmarshal(recorder.Body.Bytes(), &res)
 			require.NoError(t, err)
@@ -654,20 +694,24 @@ func TestProvisionWatcherController_PatchProvisionWatcher(t *testing.T) {
 	pwModels := models.ProvisionWatcher{
 		Id:                  *testReq.ProvisionWatcher.Id,
 		Name:                *testReq.ProvisionWatcher.Name,
+		ServiceName:         *testReq.ProvisionWatcher.ServiceName,
 		Labels:              testReq.ProvisionWatcher.Labels,
 		Identifiers:         testReq.ProvisionWatcher.Identifiers,
 		BlockingIdentifiers: testReq.ProvisionWatcher.BlockingIdentifiers,
 		AdminState:          models.AdminState(*testReq.ProvisionWatcher.AdminState),
-		ServiceName:         *testReq.ProvisionWatcher.ServiceName,
-		ProfileName:         *testReq.ProvisionWatcher.ProfileName,
-		AutoEvents:          dtos.ToAutoEventModels(testReq.ProvisionWatcher.AutoEvents),
+		DiscoveredDevice: models.DiscoveredDevice{
+			ProfileName: *testReq.ProvisionWatcher.DiscoveredDevice.ProfileName,
+			AutoEvents:  dtos.ToAutoEventModels(testReq.ProvisionWatcher.DiscoveredDevice.AutoEvents),
+			Properties:  testProperties,
+			AdminState:  models.AdminState(*testReq.ProvisionWatcher.AdminState),
+		},
 	}
 
 	valid := testReq
 	dbClientMock.On("DeviceServiceNameExists", *valid.ProvisionWatcher.ServiceName).Return(true, nil)
-	dbClientMock.On("DeviceProfileNameExists", *valid.ProvisionWatcher.ProfileName).Return(true, nil)
+	dbClientMock.On("DeviceProfileNameExists", *valid.ProvisionWatcher.DiscoveredDevice.ProfileName).Return(true, nil)
 	dbClientMock.On("ProvisionWatcherByName", *valid.ProvisionWatcher.Name).Return(pwModels, nil)
-	dbClientMock.On("UpdateProvisionWatcher", mock.Anything).Return(nil)
+	dbClientMock.On("UpdateProvisionWatcher", pwModels).Return(nil)
 	dbClientMock.On("DeviceServiceByName", *valid.ProvisionWatcher.ServiceName).Return(models.DeviceService{}, nil)
 	validWithNoReqID := testReq
 	validWithNoReqID.RequestId = ""
@@ -710,12 +754,25 @@ func TestProvisionWatcherController_PatchProvisionWatcher(t *testing.T) {
 
 	notFountServiceName := "notFoundService"
 	notFoundService := testReq
-	notFoundService.ProvisionWatcher.ServiceName = &notFountServiceName
-	dbClientMock.On("DeviceServiceNameExists", *notFoundService.ProvisionWatcher.ServiceName).Return(false, nil)
+	notFoundService.ProvisionWatcher.Id = nil
+	notFoundService.ProvisionWatcher.Name = &notFountServiceName
+	notFoundServiceProvisionWatcherModel := pwModels
+	notFoundServiceProvisionWatcherModel.Name = notFountServiceName
+	dbClientMock.On("ProvisionWatcherByName", notFountServiceName).Return(notFoundServiceProvisionWatcherModel, nil)
+	dbClientMock.On("UpdateProvisionWatcher", notFoundServiceProvisionWatcherModel).Return(
+		errors.NewCommonEdgeX(errors.KindEntityDoesNotExist, fmt.Sprintf("device service '%s' does not exists",
+			notFountServiceName), nil))
+
 	notFountProfileName := "notFoundProfile"
 	notFoundProfile := testReq
-	notFoundProfile.ProvisionWatcher.ProfileName = &notFountProfileName
-	dbClientMock.On("DeviceProfileNameExists", *notFoundProfile.ProvisionWatcher.ProfileName).Return(false, nil)
+	notFoundProfile.ProvisionWatcher.Id = nil
+	notFoundProfile.ProvisionWatcher.Name = &notFountProfileName
+	notFoundProfileProvisionWatcherModel := pwModels
+	notFoundProfileProvisionWatcherModel.Name = notFountProfileName
+	dbClientMock.On("ProvisionWatcherByName", notFountProfileName).Return(notFoundProfileProvisionWatcherModel, nil)
+	dbClientMock.On("UpdateProvisionWatcher", notFoundProfileProvisionWatcherModel).Return(
+		errors.NewCommonEdgeX(errors.KindEntityDoesNotExist, fmt.Sprintf("device profile '%s' does not exists",
+			notFountProfileName), nil))
 
 	dic.Update(di.ServiceConstructorMap{
 		container.DBClientInterfaceName: func(get di.Get) interface{} {
@@ -745,6 +802,7 @@ func TestProvisionWatcherController_PatchProvisionWatcher(t *testing.T) {
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
+			e := echo.New()
 			jsonData, err := json.Marshal(testCase.request)
 			require.NoError(t, err)
 
@@ -754,8 +812,9 @@ func TestProvisionWatcherController_PatchProvisionWatcher(t *testing.T) {
 
 			// Act
 			recorder := httptest.NewRecorder()
-			handler := http.HandlerFunc(controller.PatchProvisionWatcher)
-			handler.ServeHTTP(recorder, req)
+			c := e.NewContext(req, recorder)
+			err = controller.PatchProvisionWatcher(c)
+			require.NoError(t, err)
 
 			if testCase.expectedStatusCode == http.StatusMultiStatus {
 				var res []commonDTO.BaseResponse

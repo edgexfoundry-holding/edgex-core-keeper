@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright 2022 Intel Corporation
+ * Copyright 2022-2023 Intel Corporation
  * Copyright 2019 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
@@ -28,69 +28,77 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/environment"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/secret"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/common"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
 
 	"github.com/edgexfoundry/edgex-go/internal"
 	"github.com/edgexfoundry/edgex-go/internal/security/spiffetokenprovider/container"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/clients/logger"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/clients/logger"
 
-	bootstrapContainer "github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/container"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/startup"
-	bootstrapConfig "github.com/edgexfoundry/go-mod-bootstrap/v2/config"
+	bootstrapContainer "github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/container"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/startup"
+	bootstrapConfig "github.com/edgexfoundry/go-mod-bootstrap/v3/config"
 
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/di"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/di"
 
-	"github.com/edgexfoundry/go-mod-secrets/v2/pkg"
-	"github.com/edgexfoundry/go-mod-secrets/v2/pkg/token/authtokenloader"
-	"github.com/edgexfoundry/go-mod-secrets/v2/pkg/token/fileioperformer"
-	"github.com/edgexfoundry/go-mod-secrets/v2/pkg/types"
-	"github.com/edgexfoundry/go-mod-secrets/v2/secrets"
+	"github.com/edgexfoundry/go-mod-secrets/v3/pkg"
+	"github.com/edgexfoundry/go-mod-secrets/v3/pkg/token/authtokenloader"
+	"github.com/edgexfoundry/go-mod-secrets/v3/pkg/token/fileioperformer"
+	"github.com/edgexfoundry/go-mod-secrets/v3/pkg/types"
+	"github.com/edgexfoundry/go-mod-secrets/v3/secrets"
 )
 
 const (
 	redisSecretName                  = "redisdb"
+	messageBusSecretName             = "message-bus"
 	secretBasePath                   = "/v1/secret/edgex" // nolint:gosec
 	edgexRedisBootstrapperServiceKey = "security-bootstrapper-redis"
 )
 
 type Bootstrap struct {
-	validKnownSecrets map[string]bool
+	secretStoreConfig *bootstrapConfig.SecretStoreInfo
 }
 
 func NewBootstrap() *Bootstrap {
-	return &Bootstrap{
-		validKnownSecrets: map[string]bool{redisSecretName: true},
-	}
+	return &Bootstrap{}
 }
 
 func (b *Bootstrap) getSecretStoreClient(dic *di.Container) (secrets.SecretStoreClient, error) {
 	lc := bootstrapContainer.LoggingClientFrom(dic.Get)
-	configuration := container.ConfigurationFrom(dic.Get)
-	secretStoreConfig := configuration.SecretStore
+	var err error
+
+	envVars := environment.NewVariables(lc)
+	b.secretStoreConfig, err = secret.BuildSecretStoreConfig(common.SecuritySpiffeTokenProviderKey, envVars, lc)
+	if err != nil {
+		return nil, fmt.Errorf("unable to create SecretStore configuration %v", err)
+	}
 
 	fileOpener := fileioperformer.NewDefaultFileIoPerformer()
 
 	var httpCaller internal.HttpCaller
-	if caFilePath := secretStoreConfig.RootCaCertPath; caFilePath != "" {
+	if caFilePath := b.secretStoreConfig.RootCaCertPath; caFilePath != "" {
 		lc.Info("using certificate verification for secret store connection")
 		caReader, err := fileOpener.OpenFileReader(caFilePath, os.O_RDONLY, 0400)
 		if err != nil {
 			return nil, err
 		}
-		httpCaller = pkg.NewRequester(lc).WithTLS(caReader, secretStoreConfig.ServerName)
+		httpCaller = pkg.NewRequester(lc).WithTLS(caReader, b.secretStoreConfig.ServerName)
 	} else {
 		lc.Info("bypassing certificate verification for secret store connection")
 		httpCaller = pkg.NewRequester(lc).Insecure()
 	}
 
 	clientConfig := types.SecretConfig{
-		Type:     secretStoreConfig.Type,
-		Protocol: secretStoreConfig.Protocol,
-		Host:     secretStoreConfig.Host,
-		Port:     secretStoreConfig.Port,
+		Type:     b.secretStoreConfig.Type,
+		Protocol: b.secretStoreConfig.Protocol,
+		Host:     b.secretStoreConfig.Host,
+		Port:     b.secretStoreConfig.Port,
 	}
 	secretClient, err := secrets.NewSecretStoreClient(clientConfig, lc, httpCaller)
 	if err != nil {
@@ -108,8 +116,7 @@ func (b *Bootstrap) getPrivilegedToken(dic *di.Container) (string, error) {
 	}
 
 	// Reload token in case new token was created causing the auth error
-	configuration := container.ConfigurationFrom(dic.Get)
-	token, err := tokenLoader.Load(configuration.GetBootstrap().SecretStore.TokenFile)
+	token, err := tokenLoader.Load(b.secretStoreConfig.TokenFile)
 	if err != nil {
 		return "", err
 	}
@@ -130,8 +137,8 @@ func (b *Bootstrap) BootstrapHandler(ctx context.Context, _ *sync.WaitGroup, _ s
 	}
 
 	// Handle healthcheck endpoint
-	http.HandleFunc("/api/v2/ping", func(w http.ResponseWriter, r *http.Request) {
-		lc.Info("Request received for /api/v2/ping")
+	http.HandleFunc(common.ApiBase+"/ping", func(w http.ResponseWriter, r *http.Request) {
+		lc.Info("Health check request received")
 		_, err = io.WriteString(w, "pong")
 		if err != nil {
 			lc.Errorf("failed to write response: %v", err)
@@ -157,7 +164,7 @@ func (b *Bootstrap) BootstrapHandler(ctx context.Context, _ *sync.WaitGroup, _ s
 	//
 
 	// Handle gettoken endpoint
-	http.HandleFunc("/api/v2/gettoken", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc(common.ApiBase+"/gettoken", func(w http.ResponseWriter, r *http.Request) {
 
 		lc := bootstrapContainer.LoggingClientFrom(dic.Get)
 
@@ -256,7 +263,7 @@ func (b *Bootstrap) BootstrapHandler(ctx context.Context, _ *sync.WaitGroup, _ s
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
-		vaultTokenResponse, err := makeToken(serviceName, privilegedToken, secretStoreClient, lc)
+		vaultTokenResponse, err := makeToken(serviceName, privilegedToken, configuration.TokenConfig, secretStoreClient, lc)
 		if err != nil {
 			lc.Errorf("failed create secret store token: %v", err)
 			w.WriteHeader(http.StatusInternalServerError)
@@ -265,7 +272,7 @@ func (b *Bootstrap) BootstrapHandler(ctx context.Context, _ *sync.WaitGroup, _ s
 
 		lc.Debug("seeding the known secrets if any...")
 
-		if err := b.seedKnownSecrets(ctx, lc, configuration.SecretStore, knownSecretNames, serviceKey, privilegedToken); err != nil {
+		if err := b.seedKnownSecrets(ctx, lc, b.secretStoreConfig, knownSecretNames, serviceKey, privilegedToken); err != nil {
 			lc.Errorf("failed to seed known secrets: %v", err)
 			w.WriteHeader(http.StatusInternalServerError)
 			return
@@ -321,40 +328,28 @@ func (b *Bootstrap) BootstrapHandler(ctx context.Context, _ *sync.WaitGroup, _ s
 	tlsConfig := tlsconfig.MTLSServerConfig(source, source, tlsconfig.AuthorizeMemberOf(td))
 	tlsConfig.MinVersion = tls.VersionTLS13
 	tlsConfig.CurvePreferences = []tls.CurveID{tls.CurveP521, tls.CurveP384}
-	tlsConfig.PreferServerCipherSuites = true
 
 	serverAddress := ":" + strconv.Itoa(configuration.GetBootstrap().Service.Port)
 	server := &http.Server{
-		Addr:      serverAddress,
-		TLSConfig: tlsConfig,
+		Addr:              serverAddress,
+		ReadHeaderTimeout: time.Second * 5,
+		TLSConfig:         tlsConfig,
 	}
 
 	lc.Info("spiffe token provider starts listening and serves...")
 	if err := server.ListenAndServeTLS("", ""); err != nil {
 		lc.Errorf("Error on serve: %v", err)
+		return false
 	}
 
-	return false
+	return true
 }
 
 // seedKnownSecrets seeds or copies the known secrets from the existing service (e.g. security-bootstrapper-redis)
 // to the requested new service that also uses the same known secrets
 func (b *Bootstrap) seedKnownSecrets(ctx context.Context, lc logger.LoggingClient,
-	ssConfig bootstrapConfig.SecretStoreInfo,
+	ssConfig *bootstrapConfig.SecretStoreInfo,
 	knownSecretNames []string, serviceKey string, privilegedToken string) error {
-
-	// to see if we can find redisdb as part of known secret name since that is the known secret we can support now
-	found := false
-	for _, secretName := range knownSecretNames {
-		_, valid := b.validKnownSecrets[secretName]
-		if valid {
-			found = true
-			break
-		}
-	}
-	if !found {
-		return fmt.Errorf("cannot find secret name from validKnownSecrets")
-	}
 
 	// copy from security-bootstrapper-redis: /v1/secret/edgex/security-bootstrapper-redis/redisdb
 	// to /v1/secret/edgex/<service_key>/redisdb using secret client's APIs
@@ -363,7 +358,7 @@ func (b *Bootstrap) seedKnownSecrets(ctx context.Context, lc logger.LoggingClien
 		Type:           ssConfig.Type,
 		Host:           ssConfig.Host,
 		Port:           ssConfig.Port,
-		Path:           secretBasePath, // make sure path is like /v1/edgex/secrets/ in global area
+		BasePath:       secretBasePath, // make sure path is like /v1/edgex/secrets in global area
 		SecretsFile:    ssConfig.SecretsFile,
 		Protocol:       ssConfig.Protocol,
 		Namespace:      ssConfig.Namespace,
@@ -381,15 +376,35 @@ func (b *Bootstrap) seedKnownSecrets(ctx context.Context, lc logger.LoggingClien
 		return fmt.Errorf("found error on getting secretClient: %v", err)
 	}
 
-	// copy known secrets redisdb from redis-bootstrapper to the requested service with serviceKey
-	secrets, err := secretClient.GetSecrets(fmt.Sprintf("/%s/%s", edgexRedisBootstrapperServiceKey, redisSecretName))
-	if err != nil {
-		return fmt.Errorf("found error on getting secrets: %v", err)
-	}
+	// Copy requested known secrets
+	for _, secretName := range knownSecretNames {
+		switch secretName {
+		case redisSecretName:
+			// copy known secrets redisdb from redis-bootstrapper to the requested service with serviceKey
+			secrets, err := secretClient.GetSecret(fmt.Sprintf("%s/%s", edgexRedisBootstrapperServiceKey, redisSecretName))
+			if err != nil {
+				return fmt.Errorf("found error on getting secret %s/%s: %v", edgexRedisBootstrapperServiceKey, secretName, err)
+			}
 
-	err = secretClient.StoreSecrets(fmt.Sprintf("/%s/%s", serviceKey, redisSecretName), secrets)
-	if err != nil {
-		return fmt.Errorf("found error on storing secrets: %v", err)
+			err = secretClient.StoreSecret(fmt.Sprintf("%s/%s", serviceKey, redisSecretName), secrets)
+			if err != nil {
+				return fmt.Errorf("found error on storing secret %s/%s: %v", serviceKey, secretName, err)
+			}
+
+		case messageBusSecretName:
+			// copy known secrets redisdb from redis-bootstrapper to the requested service with serviceKey
+			secrets, err := secretClient.GetSecret(fmt.Sprintf("%s/%s", internal.BootstrapMessageBusServiceKey, messageBusSecretName))
+			if err != nil {
+				return fmt.Errorf("found error on getting secret %s/%s: %v", internal.BootstrapMessageBusServiceKey, secretName, err)
+			}
+
+			err = secretClient.StoreSecret(fmt.Sprintf("%s/%s", serviceKey, messageBusSecretName), secrets)
+			if err != nil {
+				return fmt.Errorf("found error on storing secret %s/%s: %v", serviceKey, secretName, err)
+			}
+		default:
+			lc.Warnf("unrecognized known secret requested: %s", secretName)
+		}
 	}
 
 	return nil

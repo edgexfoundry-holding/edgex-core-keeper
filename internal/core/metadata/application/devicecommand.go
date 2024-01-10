@@ -7,15 +7,14 @@ package application
 
 import (
 	"context"
-
 	"github.com/edgexfoundry/edgex-go/internal/core/metadata/container"
 	"github.com/edgexfoundry/edgex-go/internal/pkg/correlation"
-	bootstrapContainer "github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/container"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/di"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/dtos"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/dtos/requests"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/errors"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/models"
+	bootstrapContainer "github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/container"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/di"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/dtos"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/dtos/requests"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/errors"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/models"
 )
 
 // The AddDeviceProfileDeviceCommand function accepts the device profile name and device command model from the controller functions
@@ -43,6 +42,7 @@ func AddDeviceProfileDeviceCommand(profileName string, deviceCommand models.Devi
 	}
 
 	lc.Debugf("DeviceProfile deviceCommands added on DB successfully. Correlation-id: %s ", correlation.FromContext(ctx))
+	go publishUpdateDeviceProfileSystemEvent(profileDTO, ctx, dic)
 
 	return nil
 }
@@ -76,11 +76,13 @@ func PatchDeviceProfileDeviceCommand(profileName string, dto dtos.UpdateDeviceCo
 	}
 
 	lc.Debugf("DeviceProfile deviceCommands patched on DB successfully. Correlation-id: %s ", correlation.FromContext(ctx))
+	profileDTO := dtos.FromDeviceProfileModelToDTO(profile)
+	go publishUpdateDeviceProfileSystemEvent(profileDTO, ctx, dic)
 
 	return nil
 }
 
-func DeleteDeviceCommandByName(profileName string, commandName string, dic *di.Container) errors.EdgeX {
+func DeleteDeviceCommandByName(profileName string, commandName string, ctx context.Context, dic *di.Container) errors.EdgeX {
 	if profileName == "" {
 		return errors.NewCommonEdgeX(errors.KindContractInvalid, "profile name is empty", nil)
 	}
@@ -130,5 +132,6 @@ func DeleteDeviceCommandByName(profileName string, commandName string, dic *di.C
 		return errors.NewCommonEdgeXWrapper(err)
 	}
 
+	go publishUpdateDeviceProfileSystemEvent(profileDTO, ctx, dic)
 	return nil
 }

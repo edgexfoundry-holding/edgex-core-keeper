@@ -1,5 +1,6 @@
 /*******************************************************************************
  * Copyright 2019 Dell Inc.
+ * Copyright (C) 2023 Intel Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
@@ -18,14 +19,13 @@ package config
 import (
 	"fmt"
 
-	bootstrapConfig "github.com/edgexfoundry/go-mod-bootstrap/v2/config"
+	bootstrapConfig "github.com/edgexfoundry/go-mod-bootstrap/v3/config"
 )
 
 type ConfigurationStruct struct {
 	LogLevel         string
 	SecretStore      SecretStoreInfo
 	Databases        map[string]Database
-	KongAdmin        KongAdminInfo
 	SecureMessageBus SecureMessageBusInfo
 }
 
@@ -38,6 +38,11 @@ type SecureMessageBusInfo struct {
 	Type                  string
 	KuiperConfigPath      string
 	KuiperConnectionsPath string
+	Services              map[string]ServiceInfo
+}
+
+type ServiceInfo struct {
+	Service string
 }
 
 type SecretStoreInfo struct {
@@ -64,13 +69,6 @@ type SecretStoreInfo struct {
 	ConsulSecretsAdminTokenPath string
 }
 
-type KongAdminInfo struct {
-	ConfigTemplatePath string
-	ConfigFilePath     string
-	ConfigJWTPath      string
-	ConfigJWTDuration  string
-}
-
 // GetBaseURL builds and returns the base URL for the SecretStore service
 func (s SecretStoreInfo) GetBaseURL() string {
 	return fmt.Sprintf("%s://%s:%d/", s.Protocol, s.Host, s.Port)
@@ -85,6 +83,12 @@ func (c *ConfigurationStruct) UpdateFromRaw(_ interface{}) bool {
 // EmptyWritablePtr returns a pointer to a service-specific empty WritableInfo struct.
 // Not needed for this service, so return nil
 func (c *ConfigurationStruct) EmptyWritablePtr() interface{} {
+	return nil
+}
+
+// GetWritablePtr returns pointer to the writable section
+// Not needed for this service, so return nil
+func (c *ConfigurationStruct) GetWritablePtr() any {
 	return nil
 }
 

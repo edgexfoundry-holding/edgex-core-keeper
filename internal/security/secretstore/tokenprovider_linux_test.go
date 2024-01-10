@@ -14,7 +14,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under
 // the License.
 //
-// SPDX-License-Identifier: Apache-2.0'
+// SPDX-License-Identifier: Apache-2.0
 //
 
 package secretstore
@@ -26,7 +26,7 @@ import (
 
 	"github.com/edgexfoundry/edgex-go/internal/security/secretstore/config"
 
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/clients/logger"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/clients/logger"
 
 	"github.com/stretchr/testify/assert"
 )

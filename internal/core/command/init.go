@@ -1,6 +1,6 @@
 /*******************************************************************************
  * Copyright 2017 Dell Inc.
- * Copyright (c) 2019 Intel Corporation
+ * Copyright (c) 2019-2023 Intel Corporation
  * Copyright (C) 2021 IOTech Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
@@ -20,21 +20,24 @@ import (
 	"context"
 	"sync"
 
-	bootstrapContainer "github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/container"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/startup"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/di"
-	clients "github.com/edgexfoundry/go-mod-core-contracts/v2/clients/http"
-	"github.com/gorilla/mux"
+	"github.com/edgexfoundry/edgex-go/internal/core/command/container"
+	bootstrapContainer "github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/container"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/secret"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/startup"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/di"
+	clients "github.com/edgexfoundry/go-mod-core-contracts/v3/clients/http"
+
+	"github.com/labstack/echo/v4"
 )
 
 // Bootstrap contains references to dependencies required by the BootstrapHandler.
 type Bootstrap struct {
-	router      *mux.Router
+	router      *echo.Echo
 	serviceName string
 }
 
 // NewBootstrap is a factory method that returns an initialized Bootstrap receiver struct.
-func NewBootstrap(router *mux.Router, serviceName string) *Bootstrap {
+func NewBootstrap(router *echo.Echo, serviceName string) *Bootstrap {
 	return &Bootstrap{
 		router:      router,
 		serviceName: serviceName,
@@ -44,11 +47,13 @@ func NewBootstrap(router *mux.Router, serviceName string) *Bootstrap {
 // BootstrapHandler fulfills the BootstrapHandler contract and performs initialization needed by the command service.
 func (b *Bootstrap) BootstrapHandler(ctx context.Context, wg *sync.WaitGroup, _ startup.Timer, dic *di.Container) bool {
 	LoadRestRoutes(b.router, dic, b.serviceName)
+	config := container.ConfigurationFrom(dic.Get)
 
 	// DeviceServiceCommandClient is not part of the common clients handled by the NewClientsBootstrap handler
 	dic.Update(di.ServiceConstructorMap{
-		bootstrapContainer.DeviceServiceCommandClientName: func(get di.Get) interface{} { // add v2 API DeviceServiceCommandClient
-			return clients.NewDeviceServiceCommandClient()
+		bootstrapContainer.DeviceServiceCommandClientName: func(get di.Get) interface{} { // add API DeviceServiceCommandClient
+			jwtSecretProvider := secret.NewJWTSecretProvider(bootstrapContainer.SecretProviderExtFrom(get))
+			return clients.NewDeviceServiceCommandClient(jwtSecretProvider, config.Service.EnableNameFieldEscape)
 		},
 	})
 

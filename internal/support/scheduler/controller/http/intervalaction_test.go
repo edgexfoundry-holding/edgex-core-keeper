@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2021 IOTech Ltd
+// Copyright (C) 2021-2023 IOTech Ltd
 //
 // SPDX-License-Identifier: Apache-2.0
 
@@ -16,16 +16,16 @@ import (
 	"github.com/edgexfoundry/edgex-go/internal/support/scheduler/container"
 	dbMock "github.com/edgexfoundry/edgex-go/internal/support/scheduler/infrastructure/interfaces/mocks"
 
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/di"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/common"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/dtos"
-	commonDTO "github.com/edgexfoundry/go-mod-core-contracts/v2/dtos/common"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/dtos/requests"
-	responseDTO "github.com/edgexfoundry/go-mod-core-contracts/v2/dtos/responses"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/errors"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/models"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/di"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/common"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/dtos"
+	commonDTO "github.com/edgexfoundry/go-mod-core-contracts/v3/dtos/common"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/dtos/requests"
+	responseDTO "github.com/edgexfoundry/go-mod-core-contracts/v3/dtos/responses"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/errors"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/models"
 
-	"github.com/gorilla/mux"
+	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -78,6 +78,12 @@ func TestAddIntervalAction(t *testing.T) {
 	model = dtos.ToIntervalActionModel(duplicatedName.Action)
 	dbClientMock.On("AddIntervalAction", model).Return(model, errors.NewCommonEdgeX(errors.KindDuplicateName, fmt.Sprintf("intervalAction name %s already exists", model.Name), nil))
 
+	invalidIntervalNotFound := valid
+	intervalNotFoundName := "intervalNotFoundName"
+	invalidIntervalNotFound.Action.IntervalName = intervalNotFoundName
+	model = dtos.ToIntervalActionModel(invalidIntervalNotFound.Action)
+	dbClientMock.On("AddIntervalAction", model).Return(model, errors.NewCommonEdgeX(errors.KindEntityDoesNotExist, fmt.Sprintf("interval '%s' does not exists", model.IntervalName), nil))
+
 	dic.Update(di.ServiceConstructorMap{
 		container.DBClientInterfaceName: func(get di.Get) interface{} {
 			return dbClientMock
@@ -97,9 +103,11 @@ func TestAddIntervalAction(t *testing.T) {
 		{"Valid - no request Id", []requests.AddIntervalActionRequest{noRequestId}, http.StatusCreated},
 		{"Invalid - no name", []requests.AddIntervalActionRequest{noName}, http.StatusBadRequest},
 		{"Invalid - duplicated name", []requests.AddIntervalActionRequest{duplicatedName}, http.StatusConflict},
+		{"Invalid - interval not found", []requests.AddIntervalActionRequest{invalidIntervalNotFound}, http.StatusNotFound},
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
+			e := echo.New()
 			jsonData, err := json.Marshal(testCase.request)
 			require.NoError(t, err)
 
@@ -109,8 +117,9 @@ func TestAddIntervalAction(t *testing.T) {
 
 			// Act
 			recorder := httptest.NewRecorder()
-			handler := http.HandlerFunc(controller.AddIntervalAction)
-			handler.ServeHTTP(recorder, req)
+			c := e.NewContext(req, recorder)
+			err = controller.AddIntervalAction(c)
+			require.NoError(t, err)
 			if testCase.expectedStatusCode == http.StatusBadRequest {
 				var res commonDTO.BaseResponse
 				err = json.Unmarshal(recorder.Body.Bytes(), &res)
@@ -165,6 +174,7 @@ func TestAllIntervalActions(t *testing.T) {
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
+			e := echo.New()
 			req, err := http.NewRequest(http.MethodGet, common.ApiAllIntervalActionRoute, http.NoBody)
 			query := req.URL.Query()
 			if testCase.offset != "" {
@@ -178,8 +188,9 @@ func TestAllIntervalActions(t *testing.T) {
 
 			// Act
 			recorder := httptest.NewRecorder()
-			handler := http.HandlerFunc(controller.AllIntervalActions)
-			handler.ServeHTTP(recorder, req)
+			c := e.NewContext(req, recorder)
+			err = controller.AllIntervalActions(c)
+			require.NoError(t, err)
 
 			// Assert
 			if testCase.errorExpected {
@@ -234,15 +245,18 @@ func TestIntervalActionByName(t *testing.T) {
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
-			reqPath := fmt.Sprintf("%s/%s", common.ApiIntervalActionByNameRoute, testCase.actionName)
+			e := echo.New()
+			reqPath := fmt.Sprintf("%s/%s", common.ApiIntervalActionByNameEchoRoute, testCase.actionName)
 			req, err := http.NewRequest(http.MethodGet, reqPath, http.NoBody)
-			req = mux.SetURLVars(req, map[string]string{common.Name: testCase.actionName})
 			require.NoError(t, err)
 
 			// Act
 			recorder := httptest.NewRecorder()
-			handler := http.HandlerFunc(controller.IntervalActionByName)
-			handler.ServeHTTP(recorder, req)
+			c := e.NewContext(req, recorder)
+			c.SetParamNames(common.Name)
+			c.SetParamValues(testCase.actionName)
+			err = controller.IntervalActionByName(c)
+			require.NoError(t, err)
 
 			// Assert
 			if testCase.errorExpected {
@@ -301,15 +315,18 @@ func TestDeleteIntervalActionByName(t *testing.T) {
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
-			reqPath := fmt.Sprintf("%s/%s", common.ApiIntervalActionByNameRoute, testCase.actionName)
+			e := echo.New()
+			reqPath := fmt.Sprintf("%s/%s", common.ApiIntervalActionByNameEchoRoute, testCase.actionName)
 			req, err := http.NewRequest(http.MethodDelete, reqPath, http.NoBody)
-			req = mux.SetURLVars(req, map[string]string{common.Name: testCase.actionName})
 			require.NoError(t, err)
 
 			// Act
 			recorder := httptest.NewRecorder()
-			handler := http.HandlerFunc(controller.DeleteIntervalActionByName)
-			handler.ServeHTTP(recorder, req)
+			c := e.NewContext(req, recorder)
+			c.SetParamNames(common.Name)
+			c.SetParamValues(testCase.actionName)
+			err = controller.DeleteIntervalActionByName(c)
+			require.NoError(t, err)
 			var res commonDTO.BaseResponse
 			err = json.Unmarshal(recorder.Body.Bytes(), &res)
 			require.NoError(t, err)
@@ -388,6 +405,11 @@ func TestPatchIntervalAction(t *testing.T) {
 	dbClientMock.On("IntervalByName", intervalNotFoundName).Return(models.Interval{}, intervalNotFoundNameError)
 	invalidIntervalNotFound := testReq
 	invalidIntervalNotFound.Action.IntervalName = &intervalNotFoundName
+	invalidIntervalNotFoundModel := model
+	invalidIntervalNotFoundModel.IntervalName = intervalNotFoundName
+	invalidIntervalNotFound.Action.Id = nil
+	dbClientMock.On("IntervalActionByName", intervalNotFoundName).Return(invalidIntervalNotFoundModel, nil)
+	dbClientMock.On("UpdateIntervalAction", invalidIntervalNotFoundModel).Return(errors.NewCommonEdgeX(errors.KindEntityDoesNotExist, fmt.Sprintf("%s doesn't exist in the database", intervalNotFoundName), nil))
 
 	dic.Update(di.ServiceConstructorMap{
 		container.DBClientInterfaceName: func(get di.Get) interface{} {
@@ -419,6 +441,7 @@ func TestPatchIntervalAction(t *testing.T) {
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
+			e := echo.New()
 			jsonData, err := json.Marshal(testCase.request)
 			require.NoError(t, err)
 
@@ -428,8 +451,9 @@ func TestPatchIntervalAction(t *testing.T) {
 
 			// Act
 			recorder := httptest.NewRecorder()
-			handler := http.HandlerFunc(controller.PatchIntervalAction)
-			handler.ServeHTTP(recorder, req)
+			c := e.NewContext(req, recorder)
+			err = controller.PatchIntervalAction(c)
+			require.NoError(t, err)
 
 			if testCase.expectedStatusCode == http.StatusMultiStatus {
 				var res []commonDTO.BaseResponse

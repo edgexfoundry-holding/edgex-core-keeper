@@ -27,7 +27,7 @@ import (
 	"github.com/edgexfoundry/edgex-go/internal/security/bootstrapper/interfaces"
 	"github.com/edgexfoundry/edgex-go/internal/security/bootstrapper/tcp"
 
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/clients/logger"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/clients/logger"
 )
 
 const (
@@ -58,7 +58,7 @@ func NewCommand(
 	var dummy string
 
 	flagSet := flag.NewFlagSet(CommandName, flag.ContinueOnError)
-	flagSet.StringVar(&dummy, "confdir", "", "") // handled by bootstrap; duplicated here to prevent arg parsing errors
+	flagSet.StringVar(&dummy, "configDir", "", "") // handled by bootstrap; duplicated here to prevent arg parsing errors
 	flagSet.StringVar(&cmd.tcpHost, "host", "", "the hostname of TCP server to listen ")
 
 	flagSet.IntVar(&cmd.tcpPort, "port", 0, "the port number of TCP server to listen ")

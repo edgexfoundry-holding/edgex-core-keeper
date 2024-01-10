@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright 2021 Intel Corporation
+ * Copyright 2023 Intel Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
@@ -21,23 +21,24 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/common"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/common"
 
-	"github.com/edgexfoundry/edgex-go/internal"
 	bootstrapper "github.com/edgexfoundry/edgex-go/internal/security/bootstrapper/command"
 	"github.com/edgexfoundry/edgex-go/internal/security/bootstrapper/config"
 	"github.com/edgexfoundry/edgex-go/internal/security/bootstrapper/container"
 	"github.com/edgexfoundry/edgex-go/internal/security/bootstrapper/handlers"
 	"github.com/edgexfoundry/edgex-go/internal/security/bootstrapper/redis"
 
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/interfaces"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/bootstrap/startup"
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/di"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/interfaces"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/startup"
+	bootstrapConfig "github.com/edgexfoundry/go-mod-bootstrap/v3/config"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/di"
 )
 
 const (
 	configureDatabaseSubcommandName = "configureRedis"
+	setupMsgbusCredsSubcommandName  = "setupMessageBusCreds"
 )
 
 // Main function is the wrapper for the security bootstrapper main
@@ -53,18 +54,27 @@ func Main(ctx context.Context, cancel context.CancelFunc) {
 
 	// find out the subcommand name before assigning the real concrete configuration
 	// bootstrapRedis has its own configuration settings
-	var confdir string
+	var configDir string
 	flagSet := flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
-	flagSet.StringVar(&confdir, "confdir", "", "") // handled by bootstrap; duplicated here to prevent arg parsing errors
+	flagSet.StringVar(&configDir, "configDir", "", "") // handled by bootstrap; duplicated here to prevent arg parsing errors
 	err := flagSet.Parse(os.Args[1:])
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(0)
 	}
 
-	// branch out to bootstrap redis if it is configureRedis
-	if flagSet.Arg(0) == configureDatabaseSubcommandName {
+	// branch out to different entrypoints if it is from sub commands
+	switch flagSet.Arg(0) {
+
+	case configureDatabaseSubcommandName:
 		redis.Configure(ctx, cancel, f)
+		return
+	case setupMsgbusCredsSubcommandName:
+		err = ConfigureSecureMessageBus(flagSet.Arg(1), ctx, cancel, f)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
 		return
 	}
 
@@ -76,17 +86,17 @@ func Main(ctx context.Context, cancel context.CancelFunc) {
 	})
 
 	serviceHandler := handlers.NewInitialization()
-
 	bootstrap.Run(
 		ctx,
 		cancel,
 		f,
 		common.SecurityBootstrapperKey,
-		internal.ConfigStemSecurity,
+		common.ConfigStemSecurity,
 		configuration,
 		startupTimer,
 		dic,
 		false,
+		bootstrapConfig.ServiceTypeOther,
 		[]interfaces.BootstrapHandler{
 			serviceHandler.BootstrapHandler,
 		},

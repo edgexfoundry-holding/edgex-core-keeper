@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2020-2022 IOTech Ltd
+// Copyright (C) 2020-2023 IOTech Ltd
 //
 // SPDX-License-Identifier: Apache-2.0
 
@@ -7,31 +7,43 @@ package http
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+
+	messagingMocks "github.com/edgexfoundry/go-mod-messaging/v3/messaging/mocks"
+	"github.com/edgexfoundry/go-mod-messaging/v3/pkg/types"
+	"github.com/stretchr/testify/mock"
 
 	"github.com/edgexfoundry/edgex-go/internal/core/metadata/container"
 	dbMock "github.com/edgexfoundry/edgex-go/internal/core/metadata/infrastructure/interfaces/mocks"
 
-	"github.com/edgexfoundry/go-mod-bootstrap/v2/di"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/common"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/dtos"
-	commonDTO "github.com/edgexfoundry/go-mod-core-contracts/v2/dtos/common"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/dtos/requests"
-	responseDTO "github.com/edgexfoundry/go-mod-core-contracts/v2/dtos/responses"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/errors"
-	"github.com/edgexfoundry/go-mod-core-contracts/v2/models"
+	bootstrapContainer "github.com/edgexfoundry/go-mod-bootstrap/v3/bootstrap/container"
+	"github.com/edgexfoundry/go-mod-bootstrap/v3/di"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/common"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/dtos"
+	commonDTO "github.com/edgexfoundry/go-mod-core-contracts/v3/dtos/common"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/dtos/requests"
+	responseDTO "github.com/edgexfoundry/go-mod-core-contracts/v3/dtos/responses"
+	edgexErr "github.com/edgexfoundry/go-mod-core-contracts/v3/errors"
+	"github.com/edgexfoundry/go-mod-core-contracts/v3/models"
 
-	"github.com/gorilla/mux"
+	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
 var testDeviceLabels = []string{"MODBUS", "TEMP"}
+
+var testProperties = map[string]any{
+	"TestProperty1": "property1",
+	"TestProperty2": true,
+	"TestProperty3": 123.45,
+}
 
 func buildTestDeviceRequest() requests.AddDeviceRequest {
 	var testAutoEvents = []dtos.AutoEvent{
@@ -60,6 +72,7 @@ func buildTestDeviceRequest() requests.AddDeviceRequest {
 			Location:       "{40lat;45long}",
 			AutoEvents:     testAutoEvents,
 			Protocols:      testProtocols,
+			Properties:     testProperties,
 		},
 	}
 
@@ -74,9 +87,6 @@ func buildTestUpdateDeviceRequest() requests.UpdateDeviceRequest {
 	testProfileName := TestDeviceProfileName
 	testAdminState := models.Unlocked
 	testOperatingState := models.Up
-	testLastReported := int64(123546789)
-	testLastConnected := int64(123546789)
-	testNotify := false
 	var testAutoEvents = []dtos.AutoEvent{
 		{SourceName: "TestResource", Interval: "300ms", OnChange: true},
 	}
@@ -100,69 +110,41 @@ func buildTestUpdateDeviceRequest() requests.UpdateDeviceRequest {
 			ProfileName:    &testProfileName,
 			AdminState:     &testAdminState,
 			OperatingState: &testOperatingState,
-			LastReported:   &testLastReported,
-			LastConnected:  &testLastConnected,
 			Labels:         []string{"MODBUS", "TEMP"},
 			Location:       "{40lat;45long}",
 			AutoEvents:     testAutoEvents,
 			Protocols:      testProtocols,
-			Notify:         &testNotify,
+			Properties:     testProperties,
 		},
 	}
 
 	return testUpdateDeviceReq
 }
 
-func mockValidationHandler(w http.ResponseWriter, r *http.Request) {
-	defer r.Body.Close()
-	w.Header().Set("Content-Type", "application/json")
-
-	var res commonDTO.BaseResponse
-	var device requests.AddDeviceRequest
-	err := json.NewDecoder(r.Body).Decode(&device)
-	if err != nil {
-		http.Error(w, "json decoding failed", http.StatusBadRequest)
-		return
-	}
-
-	if _, ok := device.Device.Protocols["modbus-ip"]; !ok {
-		w.WriteHeader(http.StatusInternalServerError)
-		res = commonDTO.NewBaseResponse("", "validation failed", http.StatusInternalServerError)
-	} else {
-		w.WriteHeader(http.StatusOK)
-		res = commonDTO.NewBaseResponse("", "", http.StatusOK)
-	}
-
-	resBytes, err := json.Marshal(res)
-	if err != nil {
-		http.Error(w, "json encoding failed", http.StatusInternalServerError)
-	}
-	w.Write(resBytes) //nolint:errcheck
-}
-
 func TestAddDevice(t *testing.T) {
-	mockDeviceServiceServer := httptest.NewServer(http.HandlerFunc(mockValidationHandler))
-	defer mockDeviceServiceServer.Close()
-
 	testDevice := buildTestDeviceRequest()
-	deviceModel := requests.AddDeviceReqToDeviceModels([]requests.AddDeviceRequest{testDevice})[0]
+	deviceModel := dtos.ToDeviceModel(testDevice.Device)
 	expectedRequestId := ExampleUUID
 	dic := mockDic()
 	dbClientMock := &dbMock.DBClient{}
 
 	valid := testDevice
 	dbClientMock.On("DeviceServiceNameExists", deviceModel.ServiceName).Return(true, nil)
-	dbClientMock.On("DeviceProfileNameExists", deviceModel.ProfileName).Return(true, nil)
 	dbClientMock.On("AddDevice", deviceModel).Return(deviceModel, nil)
-	dbClientMock.On("DeviceServiceByName", deviceModel.ServiceName).Return(models.DeviceService{BaseAddress: mockDeviceServiceServer.URL}, nil)
-	dbClientMock.On("DeviceServiceByName", "unavailable").Return(models.DeviceService{BaseAddress: "http://unavailable"}, nil)
+
+	notFoundProfile := testDevice
+	notFoundProfile.Device.ProfileName = "notFoundProfile"
+	notFoundProfileDeviceModel := requests.AddDeviceReqToDeviceModels([]requests.AddDeviceRequest{notFoundProfile})[0]
+	dbClientMock.On("AddDevice", notFoundProfileDeviceModel).Return(notFoundProfileDeviceModel,
+		edgexErr.NewCommonEdgeX(edgexErr.KindEntityDoesNotExist, fmt.Sprintf("device profile '%s' does not exists",
+			notFoundProfile.Device.ProfileName), nil))
 
 	notFoundService := testDevice
 	notFoundService.Device.ServiceName = "notFoundService"
+	notFoundServiceDeviceModel := requests.AddDeviceReqToDeviceModels([]requests.AddDeviceRequest{notFoundService})[0]
 	dbClientMock.On("DeviceServiceNameExists", notFoundService.Device.ServiceName).Return(false, nil)
-	notFoundProfile := testDevice
-	notFoundProfile.Device.ProfileName = "notFoundProfile"
-	dbClientMock.On("DeviceProfileNameExists", notFoundProfile.Device.ProfileName).Return(false, nil)
+	dbClientMock.On("AddDevice", notFoundServiceDeviceModel).Return(notFoundServiceDeviceModel,
+		edgexErr.NewCommonEdgeX(edgexErr.KindContractInvalid, fmt.Sprintf("device service '%s' does not exists", notFoundService.Device.ServiceName), nil))
 
 	noName := testDevice
 	noName.Device.Name = ""
@@ -184,8 +166,6 @@ func TestAddDevice(t *testing.T) {
 	emptyProtocols.Device.Protocols = map[string]dtos.ProtocolProperties{}
 	invalidProtocols := testDevice
 	invalidProtocols.Device.Protocols = map[string]dtos.ProtocolProperties{"others": {}}
-	serviceUnavailable := testDevice
-	testDevice.Device.ServiceName = "unavailable"
 
 	dic.Update(di.ServiceConstructorMap{
 		container.DBClientInterfaceName: func(get di.Get) interface{} {
@@ -195,29 +175,68 @@ func TestAddDevice(t *testing.T) {
 	controller := NewDeviceController(dic)
 	assert.NotNil(t, controller)
 	tests := []struct {
-		name               string
-		request            []requests.AddDeviceRequest
-		expectedStatusCode int
+		name                 string
+		request              []requests.AddDeviceRequest
+		expectedStatusCode   int
+		expectedResponseCode int
+		expectedValidation   bool
+		expectedSystemEvent  bool
 	}{
-		{"Valid", []requests.AddDeviceRequest{valid}, http.StatusCreated},
-		{"Invalid - not found service", []requests.AddDeviceRequest{notFoundService}, http.StatusNotFound},
-		{"Invalid - not found profile", []requests.AddDeviceRequest{notFoundProfile}, http.StatusNotFound},
-		{"Invalid - no name", []requests.AddDeviceRequest{noName}, http.StatusBadRequest},
-		{"Invalid - no adminState", []requests.AddDeviceRequest{noAdminState}, http.StatusBadRequest},
-		{"Invalid - no operatingState", []requests.AddDeviceRequest{noOperatingState}, http.StatusBadRequest},
-		{"Invalid - invalid adminState", []requests.AddDeviceRequest{invalidAdminState}, http.StatusBadRequest},
-		{"Invalid - invalid operatingState", []requests.AddDeviceRequest{invalidOperatingState}, http.StatusBadRequest},
-		{"Invalid - no service name", []requests.AddDeviceRequest{noServiceName}, http.StatusBadRequest},
-		{"Invalid - no profile name", []requests.AddDeviceRequest{noProfileName}, http.StatusBadRequest},
-		{"Invalid - no protocols", []requests.AddDeviceRequest{noProtocols}, http.StatusBadRequest},
-		{"Invalid - empty protocols", []requests.AddDeviceRequest{emptyProtocols}, http.StatusBadRequest},
-		{"Invalid - invalid protocols", []requests.AddDeviceRequest{invalidProtocols}, http.StatusInternalServerError},
-		{"Valid - device service unavailable", []requests.AddDeviceRequest{serviceUnavailable}, http.StatusCreated},
+		{"Valid", []requests.AddDeviceRequest{valid}, http.StatusMultiStatus, http.StatusCreated, true, true},
+		{"Invalid - not found profile", []requests.AddDeviceRequest{notFoundProfile}, http.StatusMultiStatus, http.StatusNotFound, true, false},
+		{"Invalid - no name", []requests.AddDeviceRequest{noName}, http.StatusBadRequest, http.StatusBadRequest, false, false},
+		{"Invalid - no adminState", []requests.AddDeviceRequest{noAdminState}, http.StatusBadRequest, http.StatusBadRequest, false, false},
+		{"Invalid - no operatingState", []requests.AddDeviceRequest{noOperatingState}, http.StatusBadRequest, http.StatusBadRequest, false, false},
+		{"Invalid - invalid adminState", []requests.AddDeviceRequest{invalidAdminState}, http.StatusBadRequest, http.StatusBadRequest, false, false},
+		{"Invalid - invalid operatingState", []requests.AddDeviceRequest{invalidOperatingState}, http.StatusBadRequest, http.StatusBadRequest, false, false},
+		{"Invalid - no service name", []requests.AddDeviceRequest{noServiceName}, http.StatusBadRequest, http.StatusBadRequest, false, false},
+		{"Invalid - no profile name", []requests.AddDeviceRequest{noProfileName}, http.StatusBadRequest, http.StatusBadRequest, false, false},
+		{"Invalid - no protocols", []requests.AddDeviceRequest{noProtocols}, http.StatusBadRequest, http.StatusBadRequest, false, false},
+		{"Invalid - empty protocols", []requests.AddDeviceRequest{emptyProtocols}, http.StatusBadRequest, http.StatusBadRequest, false, false},
+		{"Invalid - invalid protocols", []requests.AddDeviceRequest{invalidProtocols}, http.StatusMultiStatus, http.StatusInternalServerError, true, false},
+		{"Invalid - not found device service", []requests.AddDeviceRequest{notFoundService}, http.StatusMultiStatus, http.StatusBadRequest, false, false},
+		{"Invalid - device service unavailable", []requests.AddDeviceRequest{valid}, http.StatusMultiStatus, http.StatusServiceUnavailable, true, false},
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
+			e := echo.New()
 			jsonData, err := json.Marshal(testCase.request)
 			require.NoError(t, err)
+
+			var responseEnvelope types.MessageEnvelope
+			mockMessaging := &messagingMocks.MessageClient{}
+			if testCase.expectedValidation {
+				if testCase.expectedResponseCode == http.StatusInternalServerError {
+					mockMessaging.On("Request", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+						requestEnvelope, ok := args.Get(0).(types.MessageEnvelope)
+						require.True(t, ok)
+						responseEnvelope = types.NewMessageEnvelopeWithError(requestEnvelope.RequestID, "validation failed")
+					}).Return(&responseEnvelope, nil)
+				} else if testCase.expectedResponseCode == http.StatusServiceUnavailable {
+					mockMessaging.On("Request", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&responseEnvelope, errors.New("timed out"))
+				} else {
+					mockMessaging.On("Request", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+						requestEnvelope, ok := args.Get(0).(types.MessageEnvelope)
+						require.True(t, ok)
+						responseEnvelope, err = types.NewMessageEnvelopeForResponse(nil, requestEnvelope.RequestID, requestEnvelope.CorrelationID, common.ContentTypeJSON)
+						require.NoError(t, err)
+					}).Return(&responseEnvelope, nil)
+				}
+			}
+
+			var wg sync.WaitGroup
+			if testCase.expectedSystemEvent {
+				wg.Add(1)
+				mockMessaging.On("Publish", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+					wg.Done()
+				}).Return(nil)
+			}
+
+			dic.Update(di.ServiceConstructorMap{
+				bootstrapContainer.MessagingClientName: func(get di.Get) interface{} {
+					return mockMessaging
+				},
+			})
 
 			reader := strings.NewReader(string(jsonData))
 			req, err := http.NewRequest(http.MethodPost, common.ApiDeviceRoute, reader)
@@ -225,19 +244,10 @@ func TestAddDevice(t *testing.T) {
 
 			// Act
 			recorder := httptest.NewRecorder()
-			handler := http.HandlerFunc(controller.AddDevice)
-			handler.ServeHTTP(recorder, req)
-			if testCase.expectedStatusCode == http.StatusBadRequest {
-				var res commonDTO.BaseResponse
-				err = json.Unmarshal(recorder.Body.Bytes(), &res)
-				require.NoError(t, err)
-
-				// Assert
-				assert.Equal(t, testCase.expectedStatusCode, recorder.Result().StatusCode, "HTTP status code not as expected")
-				assert.Equal(t, common.ApiVersion, res.ApiVersion, "API Version not as expected")
-				assert.Equal(t, testCase.expectedStatusCode, res.StatusCode, "BaseResponse status code not as expected")
-				assert.NotEmpty(t, res.Message, "Message is empty")
-			} else {
+			c := e.NewContext(req, recorder)
+			handler := controller.AddDevice
+			err = handler(c)
+			if testCase.expectedStatusCode == http.StatusMultiStatus {
 				var res []commonDTO.BaseResponse
 				err = json.Unmarshal(recorder.Body.Bytes(), &res)
 				require.NoError(t, err)
@@ -248,8 +258,26 @@ func TestAddDevice(t *testing.T) {
 				if res[0].RequestId != "" {
 					assert.Equal(t, expectedRequestId, res[0].RequestId, "RequestID not as expected")
 				}
-				assert.Equal(t, testCase.expectedStatusCode, res[0].StatusCode, "BaseResponse status code not as expected")
+				assert.Equal(t, testCase.expectedResponseCode, res[0].StatusCode, "BaseResponse status code not as expected")
+				if testCase.expectedResponseCode == http.StatusCreated {
+					assert.Empty(t, res[0].Message, "Message should be empty when it is successful")
+				} else {
+					assert.NotEmpty(t, res[0].Message, "Response message doesn't contain the error message")
+				}
+			} else {
+				var res commonDTO.BaseResponse
+				err = json.Unmarshal(recorder.Body.Bytes(), &res)
+				require.NoError(t, err)
+
+				// Assert
+				assert.Equal(t, testCase.expectedStatusCode, recorder.Result().StatusCode, "HTTP status code not as expected")
+				assert.Equal(t, common.ApiVersion, res.ApiVersion, "API Version not as expected")
+				assert.Equal(t, testCase.expectedResponseCode, res.StatusCode, "BaseResponse status code not as expected")
+				assert.NotEmpty(t, res.Message, "Response message doesn't contain the error message")
 			}
+
+			wg.Wait()
+			mockMessaging.AssertExpectations(t)
 		})
 	}
 }
@@ -262,8 +290,8 @@ func TestDeleteDeviceByName(t *testing.T) {
 	dic := mockDic()
 	dbClientMock := &dbMock.DBClient{}
 	dbClientMock.On("DeleteDeviceByName", device.Name).Return(nil)
-	dbClientMock.On("DeleteDeviceByName", notFoundName).Return(errors.NewCommonEdgeX(errors.KindEntityDoesNotExist, "device doesn't exist in the database", nil))
-	dbClientMock.On("DeviceByName", notFoundName).Return(device, errors.NewCommonEdgeX(errors.KindEntityDoesNotExist, "device doesn't exist in the database", nil))
+	dbClientMock.On("DeleteDeviceByName", notFoundName).Return(edgexErr.NewCommonEdgeX(edgexErr.KindEntityDoesNotExist, "device doesn't exist in the database", nil))
+	dbClientMock.On("DeviceByName", notFoundName).Return(device, edgexErr.NewCommonEdgeX(edgexErr.KindEntityDoesNotExist, "device doesn't exist in the database", nil))
 	dbClientMock.On("DeviceByName", device.Name).Return(device, nil)
 	dbClientMock.On("DeviceServiceByName", device.ServiceName).Return(models.DeviceService{BaseAddress: testBaseAddress}, nil)
 	dic.Update(di.ServiceConstructorMap{
@@ -286,15 +314,19 @@ func TestDeleteDeviceByName(t *testing.T) {
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
-			reqPath := fmt.Sprintf("%s/%s", common.ApiDeviceByNameRoute, testCase.deviceName)
+			e := echo.New()
+			reqPath := fmt.Sprintf("%s/%s", common.ApiDeviceByNameEchoRoute, testCase.deviceName)
 			req, err := http.NewRequest(http.MethodGet, reqPath, http.NoBody)
-			req = mux.SetURLVars(req, map[string]string{common.Name: testCase.deviceName})
 			require.NoError(t, err)
 
 			// Act
 			recorder := httptest.NewRecorder()
-			handler := http.HandlerFunc(controller.DeleteDeviceByName)
-			handler.ServeHTTP(recorder, req)
+			c := e.NewContext(req, recorder)
+			c.SetParamNames(common.Name)
+			c.SetParamValues(testCase.deviceName)
+
+			err = controller.DeleteDeviceByName(c)
+			require.NoError(t, err)
 			var res commonDTO.BaseResponse
 			err = json.Unmarshal(recorder.Body.Bytes(), &res)
 			require.NoError(t, err)
@@ -331,7 +363,7 @@ func TestAllDeviceByServiceName(t *testing.T) {
 	dbClientMock.On("DeviceCountByServiceName", testServiceA).Return(expectedTotalCountServiceA, nil)
 	dbClientMock.On("DevicesByServiceName", 0, 5, testServiceA).Return([]models.Device{devices[0], devices[1]}, nil)
 	dbClientMock.On("DevicesByServiceName", 1, 1, testServiceA).Return([]models.Device{devices[1]}, nil)
-	dbClientMock.On("DevicesByServiceName", 4, 1, testServiceB).Return([]models.Device{}, errors.NewCommonEdgeX(errors.KindEntityDoesNotExist, "query objects bounds out of range.", nil))
+	dbClientMock.On("DevicesByServiceName", 4, 1, testServiceB).Return([]models.Device{}, edgexErr.NewCommonEdgeX(edgexErr.KindEntityDoesNotExist, "query objects bounds out of range.", nil))
 	dic.Update(di.ServiceConstructorMap{
 		container.DBClientInterfaceName: func(get di.Get) interface{} {
 			return dbClientMock
@@ -357,18 +389,22 @@ func TestAllDeviceByServiceName(t *testing.T) {
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
-			req, err := http.NewRequest(http.MethodGet, common.ApiDeviceByServiceNameRoute, http.NoBody)
+			e := echo.New()
+			req, err := http.NewRequest(http.MethodGet, common.ApiDeviceByServiceNameEchoRoute, http.NoBody)
 			query := req.URL.Query()
 			query.Add(common.Offset, testCase.offset)
 			query.Add(common.Limit, testCase.limit)
 			req.URL.RawQuery = query.Encode()
-			req = mux.SetURLVars(req, map[string]string{common.Name: testCase.serviceName})
 			require.NoError(t, err)
 
 			// Act
 			recorder := httptest.NewRecorder()
-			handler := http.HandlerFunc(controller.DevicesByServiceName)
-			handler.ServeHTTP(recorder, req)
+			c := e.NewContext(req, recorder)
+			c.SetParamNames(common.Name)
+			c.SetParamValues(testCase.serviceName)
+
+			err = controller.DevicesByServiceName(c)
+			require.NoError(t, err)
 
 			// Assert
 			if testCase.errorExpected {
@@ -424,15 +460,19 @@ func TestDeviceNameExists(t *testing.T) {
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
-			reqPath := fmt.Sprintf("%s/%s", common.ApiDeviceNameExistsRoute, testCase.deviceName)
+			e := echo.New()
+			reqPath := fmt.Sprintf("%s/%s", common.ApiDeviceNameExistsEchoRoute, testCase.deviceName)
 			req, err := http.NewRequest(http.MethodGet, reqPath, http.NoBody)
-			req = mux.SetURLVars(req, map[string]string{common.Name: testCase.deviceName})
 			require.NoError(t, err)
 
 			// Act
 			recorder := httptest.NewRecorder()
-			handler := http.HandlerFunc(controller.DeviceNameExists)
-			handler.ServeHTTP(recorder, req)
+			c := e.NewContext(req, recorder)
+			c.SetParamNames(common.Name)
+			c.SetParamValues(testCase.deviceName)
+
+			err = controller.DeviceNameExists(c)
+			require.NoError(t, err)
 			var res commonDTO.BaseResponse
 			err = json.Unmarshal(recorder.Body.Bytes(), &res)
 			require.NoError(t, err)
@@ -451,9 +491,6 @@ func TestDeviceNameExists(t *testing.T) {
 }
 
 func TestPatchDevice(t *testing.T) {
-	mockDeviceServiceServer := httptest.NewServer(http.HandlerFunc(mockValidationHandler))
-	defer mockDeviceServiceServer.Close()
-
 	expectedRequestId := ExampleUUID
 	dic := mockDic()
 	dbClientMock := &dbMock.DBClient{}
@@ -465,22 +502,18 @@ func TestPatchDevice(t *testing.T) {
 		Labels:         testReq.Device.Labels,
 		AdminState:     models.AdminState(*testReq.Device.AdminState),
 		OperatingState: models.OperatingState(*testReq.Device.OperatingState),
-		LastConnected:  *testReq.Device.LastConnected,
-		LastReported:   *testReq.Device.LastReported,
 		Location:       testReq.Device.Location,
 		ServiceName:    *testReq.Device.ServiceName,
 		ProfileName:    *testReq.Device.ProfileName,
 		AutoEvents:     dtos.ToAutoEventModels(testReq.Device.AutoEvents),
 		Protocols:      dtos.ToProtocolModels(testReq.Device.Protocols),
-		Notify:         *testReq.Device.Notify,
+		Properties:     testProperties,
 	}
 
 	valid := testReq
 	dbClientMock.On("DeviceServiceNameExists", *valid.Device.ServiceName).Return(true, nil)
-	dbClientMock.On("DeviceProfileNameExists", *valid.Device.ProfileName).Return(true, nil)
 	dbClientMock.On("DeviceById", *valid.Device.Id).Return(dsModels, nil)
-	dbClientMock.On("UpdateDevice", mock.Anything).Return(nil)
-	dbClientMock.On("DeviceServiceByName", *valid.Device.ServiceName).Return(models.DeviceService{BaseAddress: mockDeviceServiceServer.URL}, nil)
+	dbClientMock.On("UpdateDevice", dsModels).Return(nil)
 
 	validWithNoReqID := testReq
 	validWithNoReqID.RequestId = ""
@@ -513,24 +546,29 @@ func TestPatchDevice(t *testing.T) {
 	invalidNotFoundId.Device.Name = nil
 	notFoundId := "12345678-1111-1234-5678-de9dac3fb9bc"
 	invalidNotFoundId.Device.Id = &notFoundId
-	notFoundIdError := errors.NewCommonEdgeX(errors.KindEntityDoesNotExist, fmt.Sprintf("%s doesn't exist in the database", notFoundId), nil)
+	notFoundIdError := edgexErr.NewCommonEdgeX(edgexErr.KindEntityDoesNotExist, fmt.Sprintf("%s doesn't exist in the database", notFoundId), nil)
 	dbClientMock.On("DeviceById", *invalidNotFoundId.Device.Id).Return(dsModels, notFoundIdError)
 
 	invalidNotFoundName := testReq
 	invalidNotFoundName.Device.Id = nil
 	notFoundName := "notFoundName"
 	invalidNotFoundName.Device.Name = &notFoundName
-	notFoundNameError := errors.NewCommonEdgeX(errors.KindEntityDoesNotExist, fmt.Sprintf("%s doesn't exist in the database", notFoundName), nil)
+	notFoundNameError := edgexErr.NewCommonEdgeX(edgexErr.KindEntityDoesNotExist, fmt.Sprintf("%s doesn't exist in the database", notFoundName), nil)
 	dbClientMock.On("DeviceByName", *invalidNotFoundName.Device.Name).Return(dsModels, notFoundNameError)
 
-	notFountServiceName := "notFoundService"
+	notFoundServiceName := "notFoundService"
 	notFoundService := testReq
-	notFoundService.Device.ServiceName = &notFountServiceName
+	notFoundService.Device.ServiceName = &notFoundServiceName
 	dbClientMock.On("DeviceServiceNameExists", *notFoundService.Device.ServiceName).Return(false, nil)
+
 	notFountProfileName := "notFoundProfile"
 	notFoundProfile := testReq
 	notFoundProfile.Device.ProfileName = &notFountProfileName
-	dbClientMock.On("DeviceProfileNameExists", *notFoundProfile.Device.ProfileName).Return(false, nil)
+	notFoundProfileDeviceModel := dsModels
+	notFoundProfileDeviceModel.ProfileName = notFountProfileName
+	dbClientMock.On("UpdateDevice", notFoundProfileDeviceModel).Return(
+		edgexErr.NewCommonEdgeX(edgexErr.KindEntityDoesNotExist,
+			fmt.Sprintf("device profile '%s' does not exists", notFountProfileName), nil))
 
 	dic.Update(di.ServiceConstructorMap{
 		container.DBClientInterfaceName: func(get di.Get) interface{} {
@@ -544,25 +582,64 @@ func TestPatchDevice(t *testing.T) {
 		request              []requests.UpdateDeviceRequest
 		expectedStatusCode   int
 		expectedResponseCode int
+		expectedValidation   bool
+		expectedSystemEvent  bool
 	}{
-		{"Valid", []requests.UpdateDeviceRequest{valid}, http.StatusMultiStatus, http.StatusOK},
-		{"Valid - no requestId", []requests.UpdateDeviceRequest{validWithNoReqID}, http.StatusMultiStatus, http.StatusOK},
-		{"Valid - no id", []requests.UpdateDeviceRequest{validWithNoId}, http.StatusMultiStatus, http.StatusOK},
-		{"Valid - no name", []requests.UpdateDeviceRequest{validWithNoName}, http.StatusMultiStatus, http.StatusOK},
-		{"Invalid - invalid id", []requests.UpdateDeviceRequest{invalidId}, http.StatusBadRequest, http.StatusBadRequest},
-		{"Invalid - empty id", []requests.UpdateDeviceRequest{emptyId}, http.StatusBadRequest, http.StatusBadRequest},
-		{"Invalid - empty name", []requests.UpdateDeviceRequest{emptyName}, http.StatusBadRequest, http.StatusBadRequest},
-		{"Invalid - not found id", []requests.UpdateDeviceRequest{invalidNotFoundId}, http.StatusMultiStatus, http.StatusNotFound},
-		{"Invalid - not found name", []requests.UpdateDeviceRequest{invalidNotFoundName}, http.StatusMultiStatus, http.StatusNotFound},
-		{"Invalid - no id and name", []requests.UpdateDeviceRequest{invalidNoIdAndName}, http.StatusBadRequest, http.StatusBadRequest},
-		{"Invalid - not found service", []requests.UpdateDeviceRequest{notFoundService}, http.StatusMultiStatus, http.StatusNotFound},
-		{"Invalid - not found profile", []requests.UpdateDeviceRequest{notFoundProfile}, http.StatusMultiStatus, http.StatusNotFound},
-		{"Invalid - invalid protocols", []requests.UpdateDeviceRequest{invalidProtocols}, http.StatusMultiStatus, http.StatusInternalServerError},
+		{"Valid", []requests.UpdateDeviceRequest{valid}, http.StatusMultiStatus, http.StatusOK, true, true},
+		{"Valid - no requestId", []requests.UpdateDeviceRequest{validWithNoReqID}, http.StatusMultiStatus, http.StatusOK, true, true},
+		{"Valid - no id", []requests.UpdateDeviceRequest{validWithNoId}, http.StatusMultiStatus, http.StatusOK, true, true},
+		{"Valid - no name", []requests.UpdateDeviceRequest{validWithNoName}, http.StatusMultiStatus, http.StatusOK, true, true},
+		{"Invalid - invalid id", []requests.UpdateDeviceRequest{invalidId}, http.StatusBadRequest, http.StatusBadRequest, false, false},
+		{"Invalid - empty id", []requests.UpdateDeviceRequest{emptyId}, http.StatusBadRequest, http.StatusBadRequest, false, false},
+		{"Invalid - empty name", []requests.UpdateDeviceRequest{emptyName}, http.StatusBadRequest, http.StatusBadRequest, false, false},
+		{"Invalid - no id and name", []requests.UpdateDeviceRequest{invalidNoIdAndName}, http.StatusBadRequest, http.StatusBadRequest, false, false},
+		{"Invalid - not found id", []requests.UpdateDeviceRequest{invalidNotFoundId}, http.StatusMultiStatus, http.StatusNotFound, false, false},
+		{"Invalid - not found name", []requests.UpdateDeviceRequest{invalidNotFoundName}, http.StatusMultiStatus, http.StatusNotFound, false, false},
+		{"Invalid - not found profile", []requests.UpdateDeviceRequest{notFoundProfile}, http.StatusMultiStatus, http.StatusNotFound, true, false},
+		{"Invalid - invalid protocols", []requests.UpdateDeviceRequest{invalidProtocols}, http.StatusMultiStatus, http.StatusInternalServerError, true, false},
+		{"Invalid - not found device service", []requests.UpdateDeviceRequest{notFoundService}, http.StatusMultiStatus, http.StatusBadRequest, false, false},
+		{"Invalid - device service unavailable", []requests.UpdateDeviceRequest{valid}, http.StatusMultiStatus, http.StatusServiceUnavailable, true, false},
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
+			e := echo.New()
 			jsonData, err := json.Marshal(testCase.request)
 			require.NoError(t, err)
+
+			var responseEnvelope types.MessageEnvelope
+			mockMessaging := &messagingMocks.MessageClient{}
+			if testCase.expectedValidation {
+				if testCase.expectedResponseCode == http.StatusInternalServerError {
+					mockMessaging.On("Request", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+						requestEnvelope, ok := args.Get(0).(types.MessageEnvelope)
+						require.True(t, ok)
+						responseEnvelope = types.NewMessageEnvelopeWithError(requestEnvelope.RequestID, "validation failed")
+					}).Return(&responseEnvelope, nil)
+				} else if testCase.expectedResponseCode == http.StatusServiceUnavailable {
+					mockMessaging.On("Request", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&responseEnvelope, errors.New("timed out"))
+				} else {
+					mockMessaging.On("Request", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+						requestEnvelope, ok := args.Get(0).(types.MessageEnvelope)
+						require.True(t, ok)
+						responseEnvelope, err = types.NewMessageEnvelopeForResponse(nil, requestEnvelope.RequestID, requestEnvelope.CorrelationID, common.ContentTypeJSON)
+						require.NoError(t, err)
+					}).Return(&responseEnvelope, nil)
+				}
+			}
+
+			var wg sync.WaitGroup
+			if testCase.expectedSystemEvent {
+				wg.Add(1)
+				mockMessaging.On("Publish", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+					wg.Done()
+				}).Return(nil)
+			}
+
+			dic.Update(di.ServiceConstructorMap{
+				bootstrapContainer.MessagingClientName: func(get di.Get) interface{} {
+					return mockMessaging
+				},
+			})
 
 			reader := strings.NewReader(string(jsonData))
 			req, err := http.NewRequest(http.MethodPatch, common.ApiDeviceRoute, reader)
@@ -570,8 +647,9 @@ func TestPatchDevice(t *testing.T) {
 
 			// Act
 			recorder := httptest.NewRecorder()
-			handler := http.HandlerFunc(controller.PatchDevice)
-			handler.ServeHTTP(recorder, req)
+			c := e.NewContext(req, recorder)
+			err = controller.PatchDevice(c)
+			require.NoError(t, err)
 
 			if testCase.expectedStatusCode == http.StatusMultiStatus {
 				var res []commonDTO.BaseResponse
@@ -602,6 +680,8 @@ func TestPatchDevice(t *testing.T) {
 				assert.NotEmpty(t, res.Message, "Response message doesn't contain the error message")
 			}
 
+			wg.Wait()
+			mockMessaging.AssertExpectations(t)
 		})
 	}
 
@@ -619,7 +699,7 @@ func TestAllDevices(t *testing.T) {
 	dbClientMock.On("AllDevices", 0, 10, []string(nil)).Return(devices, nil)
 	dbClientMock.On("AllDevices", 0, 5, testDeviceLabels).Return([]models.Device{devices[0], devices[1]}, nil)
 	dbClientMock.On("AllDevices", 1, 2, []string(nil)).Return([]models.Device{devices[1], devices[2]}, nil)
-	dbClientMock.On("AllDevices", 4, 1, testDeviceLabels).Return([]models.Device{}, errors.NewCommonEdgeX(errors.KindEntityDoesNotExist, "query objects bounds out of range.", nil))
+	dbClientMock.On("AllDevices", 4, 1, testDeviceLabels).Return([]models.Device{}, edgexErr.NewCommonEdgeX(edgexErr.KindEntityDoesNotExist, "query objects bounds out of range.", nil))
 	dic.Update(di.ServiceConstructorMap{
 		container.DBClientInterfaceName: func(get di.Get) interface{} {
 			return dbClientMock
@@ -645,6 +725,7 @@ func TestAllDevices(t *testing.T) {
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
+			e := echo.New()
 			req, err := http.NewRequest(http.MethodGet, common.ApiAllDeviceRoute, http.NoBody)
 			query := req.URL.Query()
 			query.Add(common.Offset, testCase.offset)
@@ -657,8 +738,9 @@ func TestAllDevices(t *testing.T) {
 
 			// Act
 			recorder := httptest.NewRecorder()
-			handler := http.HandlerFunc(controller.AllDevices)
-			handler.ServeHTTP(recorder, req)
+			c := e.NewContext(req, recorder)
+			err = controller.AllDevices(c)
+			require.NoError(t, err)
 
 			// Assert
 			if testCase.errorExpected {
@@ -692,7 +774,7 @@ func TestDeviceByName(t *testing.T) {
 	dic := mockDic()
 	dbClientMock := &dbMock.DBClient{}
 	dbClientMock.On("DeviceByName", device.Name).Return(device, nil)
-	dbClientMock.On("DeviceByName", notFoundName).Return(models.Device{}, errors.NewCommonEdgeX(errors.KindEntityDoesNotExist, "device doesn't exist in the database", nil))
+	dbClientMock.On("DeviceByName", notFoundName).Return(models.Device{}, edgexErr.NewCommonEdgeX(edgexErr.KindEntityDoesNotExist, "device doesn't exist in the database", nil))
 	dic.Update(di.ServiceConstructorMap{
 		container.DBClientInterfaceName: func(get di.Get) interface{} {
 			return dbClientMock
@@ -714,15 +796,19 @@ func TestDeviceByName(t *testing.T) {
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
-			reqPath := fmt.Sprintf("%s/%s", common.ApiDeviceByNameRoute, testCase.deviceName)
+			e := echo.New()
+			reqPath := fmt.Sprintf("%s/%s", common.ApiDeviceByNameEchoRoute, testCase.deviceName)
 			req, err := http.NewRequest(http.MethodGet, reqPath, http.NoBody)
-			req = mux.SetURLVars(req, map[string]string{common.Name: testCase.deviceName})
 			require.NoError(t, err)
 
 			// Act
 			recorder := httptest.NewRecorder()
-			handler := http.HandlerFunc(controller.DeviceByName)
-			handler.ServeHTTP(recorder, req)
+			c := e.NewContext(req, recorder)
+			c.SetParamNames(common.Name)
+			c.SetParamValues(testCase.deviceName)
+
+			err = controller.DeviceByName(c)
+			require.NoError(t, err)
 
 			// Assert
 			if testCase.errorExpected {
@@ -766,7 +852,7 @@ func TestDevicesByProfileName(t *testing.T) {
 	dbClientMock.On("DeviceCountByProfileName", testProfileA).Return(expectedTotalCountProfileA, nil)
 	dbClientMock.On("DevicesByProfileName", 0, 5, testProfileA).Return([]models.Device{devices[0], devices[1]}, nil)
 	dbClientMock.On("DevicesByProfileName", 1, 1, testProfileA).Return([]models.Device{devices[1]}, nil)
-	dbClientMock.On("DevicesByProfileName", 4, 1, testProfileB).Return([]models.Device{}, errors.NewCommonEdgeX(errors.KindEntityDoesNotExist, "query objects bounds out of range.", nil))
+	dbClientMock.On("DevicesByProfileName", 4, 1, testProfileB).Return([]models.Device{}, edgexErr.NewCommonEdgeX(edgexErr.KindEntityDoesNotExist, "query objects bounds out of range.", nil))
 	dic.Update(di.ServiceConstructorMap{
 		container.DBClientInterfaceName: func(get di.Get) interface{} {
 			return dbClientMock
@@ -792,18 +878,21 @@ func TestDevicesByProfileName(t *testing.T) {
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
-			req, err := http.NewRequest(http.MethodGet, common.ApiDeviceByProfileNameRoute, http.NoBody)
+			e := echo.New()
+			req, err := http.NewRequest(http.MethodGet, common.ApiDeviceByProfileNameEchoRoute, http.NoBody)
 			query := req.URL.Query()
 			query.Add(common.Offset, testCase.offset)
 			query.Add(common.Limit, testCase.limit)
 			req.URL.RawQuery = query.Encode()
-			req = mux.SetURLVars(req, map[string]string{common.Name: testCase.profileName})
 			require.NoError(t, err)
 
 			// Act
 			recorder := httptest.NewRecorder()
-			handler := http.HandlerFunc(controller.DevicesByProfileName)
-			handler.ServeHTTP(recorder, req)
+			c := e.NewContext(req, recorder)
+			c.SetParamNames(common.Name)
+			c.SetParamValues(testCase.profileName)
+			err = controller.DevicesByProfileName(c)
+			require.NoError(t, err)
 
 			// Assert
 			if testCase.errorExpected {
