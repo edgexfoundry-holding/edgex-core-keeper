@@ -14,6 +14,7 @@ require (
 	github.com/google/uuid v1.5.0
 	github.com/labstack/echo/v4 v4.11.4
 	github.com/rcrowley/go-metrics v0.0.0-20201227073835-cf1acfcdf475
+	github.com/spf13/cast v1.6.0
 	github.com/spiffe/go-spiffe/v2 v2.1.6
 	github.com/stretchr/testify v1.8.4
 	golang.org/x/crypto v0.18.0
@@ -79,3 +80,11 @@ require (
 	google.golang.org/grpc v1.56.3 // indirect
 	google.golang.org/protobuf v1.30.0 // indirect
 )
+
+replace github.com/edgexfoundry/go-mod-core-contracts/v3 => github.com/jackchenjc/go-mod-core-contracts/v3 v3.2.0-dev.4.0.20240130071054-92a2e48bc6ca
+
+replace github.com/edgexfoundry/go-mod-registry/v3 => github.com/jackchenjc/go-mod-registry/v3 v3.2.0-dev.1.0.20240130024331-d0f728a41496
+
+replace github.com/edgexfoundry/go-mod-configuration/v3 => github.com/jackchenjc/go-mod-configuration/v3 v3.2.0-dev.1.0.20240130054648-e25c4056b9df
+
+replace github.com/edgexfoundry/go-mod-bootstrap/v3 => github.com/jackchenjc/go-mod-bootstrap/v3 v3.2.0-dev.10.0.20240125072932-e0925013f378
